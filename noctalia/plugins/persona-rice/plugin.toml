@@ -1,0 +1,26 @@
+id = "schiszo/persona-rice"
+name = "Persona 5 Rice Controller"
+version = "2.0.0"
+plugin_api = 3
+author = "schiszo"
+description = "Controls the native C++23 Persona 5 Notification Overlay & Futaba Music Desktop Widget on Umbriel + Noctalia"
+
+[[setting]]
+key = "default_profile"
+label_key = "settings.default_profile"
+type = "string"
+default = "persona"
+
+[[setting]]
+key = "music_widget_enabled"
+label_key = "settings.music_widget_enabled"
+type = "bool"
+default = true
+
+[[service]]
+id = "service"
+entry = "service.luau"
+
+[[widget]]
+id = "profile"
+entry = "widget.luau"

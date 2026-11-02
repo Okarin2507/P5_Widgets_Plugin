@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# Persona 5 Rice Profile Switcher for Noctalia Shell + Umbriel Compositor + C++23 p5-rice-daemon
+#
+# Profiles:
+#   persona          -> C++ p5notify banners ON, Futaba music widget ON, Noctalia stock toast popups suppressed (DND ON)
+#   saber/elden-ring -> C++ p5notify & Futaba music widget OFF, Noctalia DND OFF (stock toast popups active)
+
+set -u
+
+PROFILE="${1:-${P5_PROFILE_SLUG:-${DMS_PROFILE_SLUG:-}}}"
+PROFILE_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/noctalia/p5-profile"
+mkdir -p "$(dirname "$PROFILE_FILE")"
+
+if [ "$PROFILE" = "--cycle" ] || [ -z "$PROFILE" ]; then
+    current="persona"
+    if [ -f "$PROFILE_FILE" ]; then
+        current="$(tr -d '[:space:]' < "$PROFILE_FILE")"
+    fi
+    case "$current" in
+        persona)
+            PROFILE="saber"
+            ;;
+        saber)
+            PROFILE="elden-ring"
+            ;;
+        *)
+            PROFILE="persona"
+            ;;
+    esac
+fi
+
+echo "$PROFILE" > "$PROFILE_FILE"
+mkdir -p "$HOME/.config/dms"
+echo "$PROFILE" > "$HOME/.config/dms/p5notify-profile"
+
+# Ensure p5-rice-daemon is running
+if ! pgrep -x "p5-rice-daemon" >/dev/null 2>&1; then
+    if command -v p5-rice-daemon >/dev/null 2>&1; then
+        p5-rice-daemon --profile "$PROFILE" >/dev/null 2>&1 &
+        sleep 0.15
+    fi
+fi
+
+case "$PROFILE" in
+    "saber"|"elden-ring")
+        # 1. Disable P5 banners & Futaba music widget via C++ CTL
+        p5-rice-ctl dismiss-all 2>/dev/null || true
+        p5-rice-ctl profile "$PROFILE" >/dev/null 2>&1 || true
+        p5-rice-ctl music off 2>/dev/null || true
+
+        # 2. Release Noctalia Do-Not-Disturb so stock Noctalia notifications appear
+        noctalia msg notification-dnd-set off 2>/dev/null || true
+        noctalia msg plugin schiszo/persona-rice:service all profile "$PROFILE" 2>/dev/null || true
+        noctalia msg plugin schiszo/persona-rice:profile all profile "$PROFILE" 2>/dev/null || true
+        ;;
+    "persona"|*)
+        # 1. Enable Noctalia Do-Not-Disturb so Noctalia hides its stock popups while still logging notification history
+        noctalia msg notification-dnd-set on 2>/dev/null || true
+        noctalia msg notification-clear-active 2>/dev/null || true
+
+        # 2. Activate C++ Persona 5 banners & Futaba music widget
+        p5-rice-ctl profile "persona" >/dev/null 2>&1 || true
+        p5-rice-ctl music on 2>/dev/null || true
+
+        noctalia msg plugin schiszo/persona-rice:service all profile "persona" 2>/dev/null || true
+        noctalia msg plugin schiszo/persona-rice:profile all profile "persona" 2>/dev/null || true
+        ;;
+esac
+
+if command -v dms-profile-notify >/dev/null 2>&1; then
+    dms-profile-notify "$PROFILE"
+elif [ -x "$HOME/.local/bin/dms-profile-notify" ]; then
+    "$HOME/.local/bin/dms-profile-notify" "$PROFILE"
+fi
+

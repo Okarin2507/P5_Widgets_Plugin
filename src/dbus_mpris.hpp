@@ -1,0 +1,74 @@
+#pragma once
+
+#include <cairo/cairo.h>
+#include <cstdint>
+#include <functional>
+#include <string>
+#include <systemd/sd-bus.h>
+#include <vector>
+
+namespace p5 {
+
+struct MprisState {
+    bool has_player = false;
+    std::string bus_name;
+    std::string identity;
+    std::string track_id;
+    std::string track_title;
+    std::string track_artist;
+    std::string art_url;
+    bool is_playing = false;
+    bool can_seek = false;
+    bool can_raise = false;
+    bool shuffle_supported = false;
+    bool shuffle = false;
+    double position_sec = 0.0;
+    double length_sec = 0.0;
+};
+
+class DbusMpris {
+public:
+    explicit DbusMpris(std::function<void()> on_state_changed);
+    ~DbusMpris();
+
+    DbusMpris(const DbusMpris&) = delete;
+    DbusMpris& operator=(const DbusMpris&) = delete;
+
+    bool start();
+    void stop();
+
+    int fd() const;
+    void process();
+
+    // Poll position when playing (called every 500ms like PersonaMusicWidget.qml Timer)
+    void poll_position();
+    void refresh_players();
+
+    const MprisState& state() const { return state_; }
+    cairo_surface_t* art_surface() const { return art_surface_; }
+
+    // Transport actions
+    void toggle_playing();
+    void next();
+    void previous();
+    void seek_to_fraction(double fraction);
+    void toggle_shuffle();
+    void raise();
+
+private:
+    std::function<void()> on_state_changed_;
+    sd_bus* bus_ = nullptr;
+    sd_bus_slot* prop_slot_ = nullptr;
+    sd_bus_slot* owner_slot_ = nullptr;
+    sd_bus_slot* seek_slot_ = nullptr;
+
+    MprisState state_{};
+    std::string loaded_art_url_;
+    cairo_surface_t* art_surface_ = nullptr;
+
+    MprisState query_player(const std::string& bus_name);
+    void update_art_surface(const std::string& url);
+};
+
+} // namespace p5
+

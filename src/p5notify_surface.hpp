@@ -1,0 +1,120 @@
+#pragma once
+
+#include "common.hpp"
+#include "dbus_notifications.hpp"
+#include "shm_buffer.hpp"
+#include "wlr-layer-shell-unstable-v1-client-protocol.h"
+
+#include <cairo/cairo.h>
+#include <cstdint>
+#include <deque>
+#include <filesystem>
+#include <string>
+#include <wayland-client.h>
+
+namespace p5 {
+
+struct BannerItem {
+    uint64_t uid = 0;
+    std::string tag;
+    std::string body;
+    int box_index = 0;
+    int32_t timeout_ms = 6000;
+    int32_t elapsed_hover_paused_ms = 0;
+    int64_t created_ms = 0;
+    int64_t last_tick_ms = 0;
+    bool critical = false;
+};
+
+class P5NotifySurface {
+public:
+    P5NotifySurface(
+        wl_compositor* compositor,
+        zwlr_layer_shell_v1* layer_shell,
+        wl_shm* shm,
+        const LoadedFonts& fonts
+    );
+    ~P5NotifySurface();
+
+    P5NotifySurface(const P5NotifySurface&) = delete;
+    P5NotifySurface& operator=(const P5NotifySurface&) = delete;
+
+    bool init();
+    void destroy();
+
+    wl_surface* surface() const { return surface_; }
+
+    void set_persona_active(bool active);
+    bool persona_active() const { return persona_active_; }
+
+    void push_notification(const NotificationEvent& ev);
+    void clear_all();
+
+    // Returns true if animations or timers are active and need periodic ticks
+    bool tick(int64_t now);
+    bool is_animating(int64_t now) const;
+
+    // Pointer interaction
+    void on_pointer_motion(double x, double y);
+    void on_pointer_leave();
+    void on_pointer_button(uint32_t button, uint32_t state);
+
+    // Wayland callbacks
+    void handle_configure(uint32_t serial, uint32_t width, uint32_t height);
+    void handle_closed();
+
+private:
+    static constexpr double kBannerW = 700.0;
+    static constexpr int kShowSeconds = 6;
+    static constexpr size_t kMaxBanners = 5;
+    static constexpr double kColMargin = 10.0;
+    static constexpr double kSpacing = -5.0;
+
+    // banner2.png placement fractions from Main.qml
+    static constexpr double kTagCX = 0.789;
+    static constexpr double kTagCY = 0.268;
+    static constexpr double kTagW = 0.15;
+    static constexpr double kTagRot = 15.7;
+
+    static constexpr double kBodyCX = 0.536;
+    static constexpr double kBodyCY = 0.538;
+    static constexpr double kBodyW = 0.54;
+    static constexpr double kBodyH = 0.30;
+    static constexpr double kBodyRot = -1.0;
+
+    wl_compositor* compositor_ = nullptr;
+    zwlr_layer_shell_v1* layer_shell_ = nullptr;
+    wl_shm* shm_ = nullptr;
+    LoadedFonts fonts_;
+
+    wl_surface* surface_ = nullptr;
+    zwlr_layer_surface_v1* layer_surface_ = nullptr;
+    ShmPool pool_{};
+
+    cairo_surface_t* banner_img_ = nullptr;
+    double banner_h_ = 160.0;
+    std::filesystem::path sound_path_;
+
+    int width_ = 740;
+    int height_ = 960;
+    bool configured_ = false;
+    bool persona_active_ = true;
+    bool pointer_inside_ = false;
+    double pointer_x_ = -1.0;
+    double pointer_y_ = -1.0;
+
+    uint64_t next_uid_ = 1;
+    std::deque<BannerItem> banners_;
+
+    // Critical stock popup dismissal timer state
+    int dismiss_stock_pass_ = 0;
+    int64_t next_dismiss_stock_ms_ = 0;
+
+    void render(int64_t now);
+    void draw_banner_card(cairo_t* cr, const BannerItem& card, double card_x, double card_y, int64_t now);
+    void update_input_region();
+    int hit_test_banner(double x, double y) const;
+};
+
+} // namespace p5
+

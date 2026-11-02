@@ -1,0 +1,15 @@
+{
+  "id": "personaMusic",
+  "name": "Persona 5 Music Player",
+  "description": "Persona 5 Confidant style desktop music widget that tracks Spotify",
+  "version": "1.0.0",
+  "requires_dms": ">=2.0.0",
+  "license": "MIT",
+  "author": "schiszo",
+  "icon": "music_note",
+  "type": "desktop",
+  "capabilities": [
+    "desktop-widget"
+  ],
+  "component": "./PersonaMusicWidget.qml"
+}

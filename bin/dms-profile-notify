@@ -1,0 +1,17 @@
+#!/usr/bin/env sh
+# Profile-switch helper for Noctalia Shell + C++23 p5-rice-daemon.
+PROFILE="$1"
+
+# Make sure no legacy Quickshell instance is running.
+pkill -f "qs -c p5notify" 2>/dev/null || true
+
+if [ "$PROFILE" = "persona" ]; then
+    # Clear any stock Noctalia notification popups on screen
+    noctalia msg notification-clear-active 2>/dev/null || true
+    # Send a Persona 5 styled welcome banner via the C++ daemon
+    p5-rice-ctl notify "PHANTOM THIEVES" "Persona 5 profile activated on Umbriel." 1 5000 2>/dev/null || true
+else
+    notify-send "Profile Switched" "Active profile: $PROFILE" 2>/dev/null || true
+fi
+
+exit 0
