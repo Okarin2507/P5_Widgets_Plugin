@@ -366,7 +366,7 @@ void P5MusicSurface::draw_button(
     spec.inv = boxed;
     spec.box_color = hovered ? Color{1.0, 1.0, 1.0, 1.0} : Color{0.0, 0.0, 0.0, 1.0};
     spec.box_text_color = hovered ? Color{0.0, 0.0, 0.0, 1.0} : Color{1.0, 1.0, 1.0, 1.0};
-    spec.box_border = spec.box_text_color;
+    spec.box_border = Color{0.0, 0.0, 0.0, 1.0};
 
     JitterMetrics m = measure_jitter_text(cr, spec);
     out_w = m.width;
@@ -414,7 +414,7 @@ void P5MusicSurface::draw_shuffle(cairo_t* cr, bool hovered, bool pressed) {
 
     const double rot_deg = (hovered && pressed) ? -11.0 : (hovered ? -7.0 : -4.0);
     const double scl = (hovered && pressed) ? 1.3 : (hovered ? 1.18 : 1.0);
-    const double alpha = supported ? 1.0 : 0.4;
+    const double alpha = 1.0;
 
     cairo_save(cr);
     cairo_translate(cr, 910.0 + 37.0, 548.0 + 26.0);

@@ -230,17 +230,15 @@ std::filesystem::path resolve_asset_path(std::string_view plugin_subdir, std::st
 }
 
 namespace {
-std::string register_single_font(const std::filesystem::path& path, bool& out_ready, std::string_view fallback) {
+std::string register_single_font(FcConfig* cfg, const std::filesystem::path& path, bool& out_ready, std::string_view fallback) {
     out_ready = false;
     std::error_code ec;
-    if (!std::filesystem::exists(path, ec)) {
+    if (!cfg || !std::filesystem::exists(path, ec)) {
         return std::string(fallback);
     }
 
-    FcConfig* cfg = FcInitLoadConfigAndFonts();
     const FcChar8* fc_path = reinterpret_cast<const FcChar8*>(path.c_str());
     FcConfigAppFontAddFile(cfg, fc_path);
-    FcConfigSetCurrent(cfg);
 
     int count = 0;
     FcBlanks* blanks = FcConfigGetBlanks(cfg);
@@ -259,28 +257,36 @@ std::string register_single_font(const std::filesystem::path& path, bool& out_re
 } // namespace
 
 LoadedFonts register_all_custom_fonts() {
+    FcConfig* cfg = FcInitLoadConfigAndFonts();
     LoadedFonts fonts;
     bool dummy = false;
     fonts.notify_p5_main = register_single_font(
+        cfg,
         resolve_asset_path("p5notify", "fonts/Persona5main.ttf"),
         fonts.notify_p5_ready,
         "Impact"
     );
     fonts.notify_ux_regular = register_single_font(
+        cfg,
         resolve_asset_path("p5notify", "fonts/PersonifiedUXRegular.ttf"),
         dummy,
         "Sans"
     );
     fonts.music_persona = register_single_font(
+        cfg,
         resolve_asset_path("personaMusic", "fonts/personafont.ttf"),
         fonts.music_persona_ready,
         "Impact"
     );
     fonts.music_ux_regular = register_single_font(
+        cfg,
         resolve_asset_path("personaMusic", "fonts/PersonifiedUXRegular.ttf"),
         dummy,
         fonts.notify_ux_regular
     );
+    if (cfg) {
+        FcConfigSetCurrent(cfg);
+    }
     return fonts;
 }
 

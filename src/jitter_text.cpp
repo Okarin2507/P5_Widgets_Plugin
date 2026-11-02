@@ -16,7 +16,7 @@ double jitter_rnd(int i, int k, double seed) {
 
 PangoFontDescription* make_font_desc(const std::string& family, double pixel_size, bool bold) {
     PangoFontDescription* desc = pango_font_description_new();
-    const std::string fam_chain = (family.empty() ? "Sans" : family) + ", Noto Color Emoji, Sans";
+    const std::string fam_chain = (family.empty() ? "Sans" : family) + ", Sans, Noto Color Emoji";
     pango_font_description_set_family(desc, fam_chain.c_str());
     pango_font_description_set_absolute_size(desc, pixel_size * PANGO_SCALE);
     pango_font_description_set_weight(desc, bold ? PANGO_WEIGHT_BOLD : PANGO_WEIGHT_NORMAL);
@@ -48,12 +48,13 @@ JitterMetrics measure_jitter_text(cairo_t* cr, const JitterSpec& spec) {
 
     double row_w = 0.0;
     for (size_t i = 0; i < m.chars.size(); ++i) {
-        pango_layout_set_text(layout, m.chars[i].c_str(), -1);
         int pw = 0, ph = 0;
-        pango_layout_get_pixel_size(layout, &pw, &ph);
-        // Ensure spaces have visible advance width
-        if (m.chars[i] == " " && pw < spec.pixel_size * 0.28) {
-            pw = static_cast<int>(std::ceil(spec.pixel_size * 0.30));
+        if (m.chars[i] == " ") {
+            pw = static_cast<int>(std::round(spec.pixel_size * 0.31));
+            ph = static_cast<int>(std::round(spec.pixel_size));
+        } else {
+            pango_layout_set_text(layout, m.chars[i].c_str(), -1);
+            pango_layout_get_pixel_size(layout, &pw, &ph);
         }
         m.char_widths.push_back(static_cast<double>(pw));
         m.char_heights.push_back(static_cast<double>(ph));
@@ -101,10 +102,11 @@ void draw_jitter_text(cairo_t* cr, const JitterSpec& spec, const JitterMetrics* 
         cairo_translate(cr, -cw * 0.5, -ch * 0.5);
 
         pango_layout_set_text(layout, m.chars[idx].c_str(), -1);
+        pango_cairo_update_layout(cr, layout);
 
         if (boxed) {
-            // Rectangle with margins -4 and border.width 2
-            cairo_rectangle(cr, -4.0, -4.0, cw + 8.0, ch + 8.0);
+            // Cutout rectangle matching original QML JitterText
+            cairo_rectangle(cr, -3.0, -2.0, cw + 6.0, ch + 4.0);
             cairo_set_source_rgba(cr, spec.box_color.r, spec.box_color.g, spec.box_color.b, spec.box_color.a);
             cairo_fill_preserve(cr);
             cairo_set_source_rgba(cr, spec.box_border.r, spec.box_border.g, spec.box_border.b, spec.box_border.a);

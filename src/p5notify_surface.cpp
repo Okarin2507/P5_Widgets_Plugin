@@ -468,7 +468,7 @@ void P5NotifySurface::draw_banner_card(
         // Use Persona5main ransom-note font only when the tag is pure ASCII;
         // for Vietnamese/Unicode tags, use Vietnamese-enabled Personified UX so accents render cleanly.
         const bool use_p5_main = fonts_.notify_p5_ready && is_pure_ascii(card.tag);
-        const std::string title_font = (use_p5_main ? fonts_.notify_p5_main : fonts_.notify_ux_regular) + ", Noto Color Emoji, Sans";
+        const std::string title_font = (use_p5_main ? fonts_.notify_p5_main : fonts_.notify_ux_regular) + ", Sans, Noto Color Emoji";
         const double title_size = use_p5_main ? 12.0 : 15.0;
         const bool title_bold = !use_p5_main;
 
@@ -570,7 +570,7 @@ void P5NotifySurface::draw_banner_card(
         cairo_clip(cr);
 
         PangoFontDescription* desc_body = pango_font_description_new();
-        const std::string body_font = fonts_.notify_ux_regular + ", Noto Color Emoji, Sans";
+        const std::string body_font = fonts_.notify_ux_regular + ", Sans, Noto Color Emoji";
         pango_font_description_set_family(desc_body, body_font.c_str());
         pango_font_description_set_absolute_size(desc_body, 19.0 * PANGO_SCALE);
 
