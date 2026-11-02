@@ -31,11 +31,15 @@ mkdir -p "$HOME/.local/bin" "$p5_assets_dir/p5notify/fonts" "$p5_assets_dir/p5no
 
 case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) echo "warning: ~/.local/bin is not in your PATH" ;; esac
 
+# Stop running daemon before replacing binary (avoids 'Text file busy')
+systemctl --user stop p5-rice-daemon.service >/dev/null 2>&1 || true
+pkill -x p5-rice-daemon >/dev/null 2>&1 || true
+
 # Install compiled C++ binaries (notification + music daemon & controller)
 for bin_name in p5-rice-daemon p5-rice-ctl; do
   [ -f "$HOME/.local/bin/$bin_name" ] && cp "$HOME/.local/bin/$bin_name" "$bak/"
-  cp "$here/build/$bin_name" "$HOME/.local/bin/$bin_name"
-  chmod +x "$HOME/.local/bin/$bin_name"
+  rm -f "$HOME/.local/bin/$bin_name"
+  install -m 755 "$here/build/$bin_name" "$HOME/.local/bin/$bin_name"
 done
 
 # Install profile switcher helper
@@ -89,7 +93,10 @@ EOF
 if command -v systemctl >/dev/null 2>&1; then
   systemctl --user daemon-reload >/dev/null 2>&1 || true
   systemctl --user enable p5-rice-daemon.service >/dev/null 2>&1 || true
-  systemctl --user restart p5-rice-daemon.service >/dev/null 2>&1 || true
+  systemctl --user restart p5-rice-daemon.service >/dev/null 2>&1 || \
+    (nohup "$HOME/.local/bin/p5-rice-daemon" >/dev/null 2>&1 &)
+else
+  nohup "$HOME/.local/bin/p5-rice-daemon" >/dev/null 2>&1 &
 fi
 
 # If a previous install wrote our template with [keybinds] into ~/.config/umbriel/config.toml,
