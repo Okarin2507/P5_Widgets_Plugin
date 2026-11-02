@@ -5,6 +5,7 @@
 #include <functional>
 #include <string>
 #include <systemd/sd-bus.h>
+#include <unordered_map>
 #include <vector>
 
 namespace p5 {
@@ -13,6 +14,8 @@ struct MprisState {
     bool has_player = false;
     std::string bus_name;
     std::string identity;
+    std::string desktop_entry;
+    std::string playback_status;
     std::string track_id;
     std::string track_title;
     std::string track_artist;
@@ -56,19 +59,30 @@ public:
     void raise();
 
 private:
+    struct PlayerHistory {
+        bool was_playing = false;
+        int64_t play_started_ms = 0;
+        int64_t first_seen_ms = 0;
+    };
+
     std::function<void()> on_state_changed_;
     sd_bus* bus_ = nullptr;
     sd_bus_slot* prop_slot_ = nullptr;
     sd_bus_slot* owner_slot_ = nullptr;
     sd_bus_slot* seek_slot_ = nullptr;
+    sd_bus_slot* noctalia_active_slot_ = nullptr;
+    sd_bus_slot* noctalia_track_slot_ = nullptr;
+    sd_bus_slot* noctalia_players_slot_ = nullptr;
 
     MprisState state_{};
     std::string last_active_bus_name_;
     std::string loaded_art_url_;
     cairo_surface_t* art_surface_ = nullptr;
     int poll_counter_ = 0;
+    std::unordered_map<std::string, PlayerHistory> history_;
 
     MprisState query_player(const std::string& bus_name);
+    void query_noctalia_mpris(std::vector<MprisState>& out_players, std::string& out_active_bus);
     void update_art_surface(const std::string& url);
 };
 

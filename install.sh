@@ -66,10 +66,17 @@ if [ ! -f "$noctalia_dir/p5-profile" ]; then
   echo "persona" > "$noctalia_dir/p5-profile"
 fi
 
-# Disable Noctalia's stock notification daemon so Discord & all app notifications
-# display exclusively through the Persona 5 notification widget
+# Disable Noctalia's stock notification daemon & internal toast popups so Discord,
+# screenshots, and all app notifications display exclusively through the Persona 5 widget
 if command -v noctalia >/dev/null 2>&1; then
   noctalia msg config-set notification.enable_daemon false >/dev/null 2>&1 || true
+  noctalia msg config-set notification.filter.persona_suppress_toast.enabled true >/dev/null 2>&1 || true
+  noctalia msg config-set notification.filter.persona_suppress_toast.match_content ".*" >/dev/null 2>&1 || true
+  noctalia msg config-set notification.filter.persona_suppress_toast.show_toast false >/dev/null 2>&1 || true
+  noctalia msg config-set notification.filter.persona_suppress_toast.play_sound false >/dev/null 2>&1 || true
+  noctalia msg config-set notification.filter.persona_suppress_toast.save_history true >/dev/null 2>&1 || true
+  noctalia msg config-set notification.filter_order '["persona_suppress_toast"]' >/dev/null 2>&1 || true
+  noctalia msg notification-dnd-set true >/dev/null 2>&1 || true
   noctalia msg notification-clear-active >/dev/null 2>&1 || true
 fi
 

@@ -171,6 +171,65 @@ struct DaemonContext {
         return nullptr;
     }
 
+    void sync_noctalia_notification_suppression(bool is_persona) {
+        if (!enable_notify) return;
+        p5::spawn_detached({
+            "noctalia",
+            "msg",
+            "config-set",
+            "notification.enable_daemon",
+            is_persona ? "false" : "true"
+        });
+        p5::spawn_detached({
+            "noctalia",
+            "msg",
+            "config-set",
+            "notification.filter.persona_suppress_toast.enabled",
+            is_persona ? "true" : "false"
+        });
+        if (is_persona) {
+            p5::spawn_detached({
+                "noctalia",
+                "msg",
+                "config-set",
+                "notification.filter.persona_suppress_toast.match_content",
+                ".*"
+            });
+            p5::spawn_detached({
+                "noctalia",
+                "msg",
+                "config-set",
+                "notification.filter.persona_suppress_toast.show_toast",
+                "false"
+            });
+            p5::spawn_detached({
+                "noctalia",
+                "msg",
+                "config-set",
+                "notification.filter.persona_suppress_toast.play_sound",
+                "false"
+            });
+            p5::spawn_detached({
+                "noctalia",
+                "msg",
+                "config-set",
+                "notification.filter.persona_suppress_toast.save_history",
+                "true"
+            });
+            p5::spawn_detached({
+                "noctalia",
+                "msg",
+                "config-set",
+                "notification.filter_order",
+                "[\"persona_suppress_toast\"]"
+            });
+            p5::spawn_detached({"noctalia", "msg", "notification-dnd-set", "true"});
+            p5::spawn_detached({"noctalia", "msg", "notification-clear-active"});
+        } else {
+            p5::spawn_detached({"noctalia", "msg", "notification-dnd-set", "false"});
+        }
+    }
+
     void apply_profile(const std::string& prof) {
         if (prof.empty()) return;
         const bool changed = (active_profile != prof);
@@ -187,13 +246,7 @@ struct DaemonContext {
         }
 
         if (changed && enable_notify) {
-            p5::spawn_detached({
-                "noctalia",
-                "msg",
-                "config-set",
-                "notification.enable_daemon",
-                is_persona ? "false" : "true"
-            });
+            sync_noctalia_notification_suppression(is_persona);
         }
     }
 
@@ -460,9 +513,9 @@ int main(int argc, char** argv) {
     ctx.active_profile = initial_profile.empty() ? p5::read_active_profile() : initial_profile;
 
     // If persona notifications are enabled, disable Noctalia's built-in notification toast daemon
-    // so Discord and all desktop apps render exclusively through the Persona 5 widget.
-    if (ctx.enable_notify && ctx.active_profile == "persona") {
-        p5::spawn_detached({"noctalia", "msg", "config-set", "notification.enable_daemon", "false"});
+    // and suppress internal Noctalia toast popups so all notifications render through Persona 5.
+    if (ctx.enable_notify) {
+        ctx.sync_noctalia_notification_suppression(ctx.active_profile == "persona");
     }
 
     p5::DbusMpris mpris([&]() {
@@ -479,8 +532,7 @@ int main(int argc, char** argv) {
 
     ctx.init_all_outputs();
 
-    p5::ControlCallbacks cbs;
-    cbs.on_notification = [&](const p5::NotificationEvent& ev) {
+    auto push_notification_to_all = [&](const p5::NotificationEvent& ev) {
         if (!ctx.enable_notify) return;
         const uint64_t uid = ctx.next_notif_uid++;
         std::string summary = p5::strip_markup(ev.summary);
@@ -499,6 +551,9 @@ int main(int argc, char** argv) {
             }
         }
     };
+
+    p5::ControlCallbacks cbs;
+    cbs.on_notification = push_notification_to_all;
     cbs.on_profile_change = [&](const std::string& prof) {
         auto pfile = p5::config_home() / "noctalia" / "p5-profile";
         std::error_code ec;
@@ -535,8 +590,14 @@ int main(int argc, char** argv) {
 
     wl_display_roundtrip(ctx.display);
 
-    // Set up inotify for profile file changes
+    // Set up inotify for profile file changes AND Noctalia internal screenshot saves
     int inotify_fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
+    int wd_pictures = -1;
+    int wd_screenshots = -1;
+    std::filesystem::path pictures_dir;
+    std::filesystem::path screenshots_dir;
+    std::string last_screenshot_notified;
+
     if (inotify_fd >= 0) {
         auto noctalia_dir = p5::config_home() / "noctalia";
         auto dms_dir = p5::config_home() / "dms";
@@ -545,6 +606,18 @@ int main(int argc, char** argv) {
         inotify_add_watch(inotify_fd, noctalia_dir.c_str(), IN_CLOSE_WRITE | IN_MOVED_TO | IN_CREATE);
         if (std::filesystem::exists(dms_dir, ec)) {
             inotify_add_watch(inotify_fd, dms_dir.c_str(), IN_CLOSE_WRITE | IN_MOVED_TO | IN_CREATE);
+        }
+
+        const char* home_env = std::getenv("HOME");
+        if (home_env && *home_env) {
+            pictures_dir = std::filesystem::path(home_env) / "Pictures";
+            screenshots_dir = pictures_dir / "Screenshots";
+            if (std::filesystem::exists(pictures_dir, ec)) {
+                wd_pictures = inotify_add_watch(inotify_fd, pictures_dir.c_str(), IN_CLOSE_WRITE | IN_MOVED_TO);
+            }
+            if (std::filesystem::exists(screenshots_dir, ec)) {
+                wd_screenshots = inotify_add_watch(inotify_fd, screenshots_dir.c_str(), IN_CLOSE_WRITE | IN_MOVED_TO);
+            }
         }
     }
 
@@ -616,9 +689,39 @@ int main(int argc, char** argv) {
             } else if (fd == mpris_fd) {
                 mpris.process();
             } else if (fd == inotify_fd) {
-                char buf[512];
-                while (read(inotify_fd, buf, sizeof(buf)) > 0) {}
-                ctx.apply_profile(p5::read_active_profile());
+                alignas(inotify_event) char buf[4096];
+                ssize_t n = 0;
+                bool check_profile = false;
+                while ((n = read(inotify_fd, buf, sizeof(buf))) > 0) {
+                    const char* ptr = buf;
+                    while (ptr < buf + n) {
+                        const auto* ev = reinterpret_cast<const inotify_event*>(ptr);
+                        if (ev->wd == wd_pictures || ev->wd == wd_screenshots) {
+                            if (ev->len > 0 && ctx.enable_notify && ctx.active_profile == "persona") {
+                                std::string fname(ev->name);
+                                if (fname.starts_with("screenshot") &&
+                                    (fname.ends_with(".png") || fname.ends_with(".jpg") || fname.ends_with(".webp")) &&
+                                    fname != last_screenshot_notified) {
+                                    last_screenshot_notified = fname;
+                                    const auto& base_dir = (ev->wd == wd_screenshots) ? screenshots_dir : pictures_dir;
+                                    std::string full_path = (base_dir / fname).string();
+                                    p5::NotificationEvent nev;
+                                    nev.app_name = "Noctalia";
+                                    nev.summary = "Screenshot saved";
+                                    nev.body = full_path;
+                                    nev.expire_timeout = 4500;
+                                    push_notification_to_all(nev);
+                                }
+                            }
+                        } else {
+                            check_profile = true;
+                        }
+                        ptr += sizeof(inotify_event) + ev->len;
+                    }
+                }
+                if (check_profile) {
+                    ctx.apply_profile(p5::read_active_profile());
+                }
             }
         }
 
