@@ -38,16 +38,16 @@ constexpr zwlr_layer_surface_v1_listener kLayerSurfaceListener = {
 };
 
 void compute_card_transform(int64_t age_ms, double& out_tx, double& out_opacity, double& out_angle_deg) {
-    // Top-Left corner: 0..300ms x slides from -120 -> 0 with OutBack
+    // Top-Right corner: 0..300ms x slides from 120 -> 0 with OutBack
     if (age_ms <= 0) {
-        out_tx = -120.0;
+        out_tx = 120.0;
         out_opacity = 0.0;
         out_angle_deg = 0.0;
         return;
     }
     if (age_ms < 300) {
         double t = static_cast<double>(age_ms) / 300.0;
-        out_tx = -120.0 * (1.0 - ease_out_back(t));
+        out_tx = 120.0 * (1.0 - ease_out_back(t));
     } else {
         out_tx = 0.0;
     }
@@ -163,12 +163,12 @@ bool P5NotifySurface::init() {
     }
 
     zwlr_layer_surface_v1_add_listener(layer_surface_, &kLayerSurfaceListener, this);
-    // Anchor at Top-Left corner on this monitor
+    // Anchor at Top-Right corner on this monitor
     zwlr_layer_surface_v1_set_anchor(
         layer_surface_,
-        ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP | ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT
+        ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP | ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT
     );
-    zwlr_layer_surface_v1_set_margin(layer_surface_, 14, 0, 0, 14);
+    zwlr_layer_surface_v1_set_margin(layer_surface_, 14, 14, 0, 0);
     zwlr_layer_surface_v1_set_exclusive_zone(layer_surface_, 0);
     zwlr_layer_surface_v1_set_keyboard_interactivity(
         layer_surface_,
@@ -343,7 +343,7 @@ bool P5NotifySurface::tick(int64_t now) {
 
 int P5NotifySurface::hit_test_banner(double x, double y) const {
     if (banners_.empty()) return -1;
-    const double col_x = kColMargin;
+    const double col_x = static_cast<double>(width_) - kColMargin - kBannerW;
     if (x < col_x || x > col_x + kBannerW) return -1;
 
     double cur_y = kColMargin;
@@ -399,7 +399,7 @@ void P5NotifySurface::update_input_region() {
     if (!compositor_ || !surface_) return;
     wl_region* reg = wl_compositor_create_region(compositor_);
     if (!banners_.empty()) {
-        const int col_x = static_cast<int>(kColMargin);
+        const int col_x = static_cast<int>(width_ - kColMargin - kBannerW);
         const int col_y = static_cast<int>(kColMargin);
         const int col_w = static_cast<int>(kBannerW);
         const int col_h = static_cast<int>(
@@ -427,8 +427,8 @@ void P5NotifySurface::draw_banner_card(
     // Translate to card position + slide-in tx
     cairo_translate(cr, card_x + tx, card_y);
 
-    // Wobble rotation around origin (card.width * 0.3, card.height * 0.5)
-    const double ox = kBannerW * 0.3;
+    // Wobble rotation around origin (card.width * 0.7, card.height * 0.5)
+    const double ox = kBannerW * 0.7;
     const double oy = banner_h_ * 0.5;
     cairo_translate(cr, ox, oy);
     cairo_rotate(cr, angle_deg * std::numbers::pi / 180.0);
@@ -608,7 +608,7 @@ void P5NotifySurface::render(int64_t now) {
     cairo_restore(cr);
 
     if (persona_active_ && !banners_.empty()) {
-        const double col_x = kColMargin;
+        const double col_x = static_cast<double>(width_) - kColMargin - kBannerW;
         double cur_y = kColMargin;
         for (const auto& card : banners_) {
             draw_banner_card(cr, card, col_x, cur_y, now);
