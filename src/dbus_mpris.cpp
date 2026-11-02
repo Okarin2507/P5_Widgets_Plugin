@@ -2,8 +2,10 @@
 #include "common.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <curl/curl.h>
+#include <glib.h>
 #include <iostream>
 
 namespace p5 {
@@ -45,39 +47,114 @@ std::string decode_file_uri(std::string_view uri) {
     return out;
 }
 
+std::string read_string_or_string_array(sd_bus_message* m, const char* vtype) {
+    std::string result;
+    if (!vtype) return result;
+    if (std::strcmp(vtype, "s") == 0) {
+        if (sd_bus_message_enter_container(m, SD_BUS_TYPE_VARIANT, "s") >= 0) {
+            const char* val = nullptr;
+            if (sd_bus_message_read_basic(m, SD_BUS_TYPE_STRING, &val) >= 0 && val) {
+                result = val;
+            }
+            sd_bus_message_exit_container(m);
+        }
+    } else if (std::strcmp(vtype, "as") == 0) {
+        if (sd_bus_message_enter_container(m, SD_BUS_TYPE_VARIANT, "as") >= 0) {
+            if (sd_bus_message_enter_container(m, SD_BUS_TYPE_ARRAY, "s") >= 0) {
+                const char* a = nullptr;
+                while (sd_bus_message_read_basic(m, SD_BUS_TYPE_STRING, &a) > 0) {
+                    if (a && *a) {
+                        if (!result.empty()) result += ", ";
+                        result += a;
+                    }
+                }
+                sd_bus_message_exit_container(m);
+            }
+            sd_bus_message_exit_container(m);
+        }
+    } else {
+        sd_bus_message_skip(m, "v");
+    }
+    return result;
+}
+
+double read_numeric_variant_us_to_sec(sd_bus_message* m, const char* vtype) {
+    double sec = 0.0;
+    if (!vtype) {
+        sd_bus_message_skip(m, "v");
+        return 0.0;
+    }
+    if (std::strcmp(vtype, "x") == 0) {
+        if (sd_bus_message_enter_container(m, SD_BUS_TYPE_VARIANT, "x") >= 0) {
+            int64_t us = 0;
+            if (sd_bus_message_read_basic(m, SD_BUS_TYPE_INT64, &us) >= 0 && us > 0) {
+                sec = static_cast<double>(us) / 1e6;
+            }
+            sd_bus_message_exit_container(m);
+        }
+    } else if (std::strcmp(vtype, "t") == 0) {
+        if (sd_bus_message_enter_container(m, SD_BUS_TYPE_VARIANT, "t") >= 0) {
+            uint64_t us = 0;
+            if (sd_bus_message_read_basic(m, SD_BUS_TYPE_UINT64, &us) >= 0 && us > 0) {
+                sec = static_cast<double>(us) / 1e6;
+            }
+            sd_bus_message_exit_container(m);
+        }
+    } else if (std::strcmp(vtype, "i") == 0) {
+        if (sd_bus_message_enter_container(m, SD_BUS_TYPE_VARIANT, "i") >= 0) {
+            int32_t us = 0;
+            if (sd_bus_message_read_basic(m, SD_BUS_TYPE_INT32, &us) >= 0 && us > 0) {
+                sec = static_cast<double>(us) / 1e6;
+            }
+            sd_bus_message_exit_container(m);
+        }
+    } else if (std::strcmp(vtype, "u") == 0) {
+        if (sd_bus_message_enter_container(m, SD_BUS_TYPE_VARIANT, "u") >= 0) {
+            uint32_t us = 0;
+            if (sd_bus_message_read_basic(m, SD_BUS_TYPE_UINT32, &us) >= 0 && us > 0) {
+                sec = static_cast<double>(us) / 1e6;
+            }
+            sd_bus_message_exit_container(m);
+        }
+    } else if (std::strcmp(vtype, "d") == 0) {
+        if (sd_bus_message_enter_container(m, SD_BUS_TYPE_VARIANT, "d") >= 0) {
+            double val = 0.0;
+            if (sd_bus_message_read_basic(m, SD_BUS_TYPE_DOUBLE, &val) >= 0 && val > 0.0) {
+                sec = (val > 100000.0) ? (val / 1e6) : val;
+            }
+            sd_bus_message_exit_container(m);
+        }
+    } else {
+        sd_bus_message_skip(m, "v");
+    }
+    return sec;
+}
+
 void parse_metadata_array(sd_bus_message* m, MprisState& st) {
     if (sd_bus_message_enter_container(m, SD_BUS_TYPE_ARRAY, "{sv}") < 0) {
         return;
     }
+
+    std::string album_artist;
+    std::string album;
+
     while (sd_bus_message_enter_container(m, SD_BUS_TYPE_DICT_ENTRY, "sv") > 0) {
         const char* key = nullptr;
         if (sd_bus_message_read_basic(m, SD_BUS_TYPE_STRING, &key) >= 0 && key) {
             const char* vtype = nullptr;
             if (sd_bus_message_peek_type(m, nullptr, &vtype) >= 0 && vtype) {
-                if (std::strcmp(key, "xesam:title") == 0 && std::strcmp(vtype, "s") == 0) {
-                    if (sd_bus_message_enter_container(m, SD_BUS_TYPE_VARIANT, "s") >= 0) {
-                        const char* val = nullptr;
-                        if (sd_bus_message_read_basic(m, SD_BUS_TYPE_STRING, &val) >= 0 && val) {
-                            st.track_title = val;
-                        }
-                        sd_bus_message_exit_container(m);
-                    }
-                } else if (std::strcmp(key, "xesam:artist") == 0 && std::strcmp(vtype, "as") == 0) {
-                    if (sd_bus_message_enter_container(m, SD_BUS_TYPE_VARIANT, "as") >= 0) {
-                        if (sd_bus_message_enter_container(m, SD_BUS_TYPE_ARRAY, "s") >= 0) {
-                            std::string artists;
-                            const char* a = nullptr;
-                            while (sd_bus_message_read_basic(m, SD_BUS_TYPE_STRING, &a) > 0) {
-                                if (a && *a) {
-                                    if (!artists.empty()) artists += ", ";
-                                    artists += a;
-                                }
-                            }
-                            if (!artists.empty()) st.track_artist = artists;
-                            sd_bus_message_exit_container(m);
-                        }
-                        sd_bus_message_exit_container(m);
-                    }
+                if (std::strcmp(key, "xesam:title") == 0) {
+                    std::string s = read_string_or_string_array(m, vtype);
+                    if (!s.empty()) st.track_title = std::move(s);
+                } else if (std::strcmp(key, "xesam:artist") == 0) {
+                    std::string s = read_string_or_string_array(m, vtype);
+                    if (!s.empty()) st.track_artist = std::move(s);
+                } else if (std::strcmp(key, "xesam:albumArtist") == 0) {
+                    std::string s = read_string_or_string_array(m, vtype);
+                    if (!s.empty()) album_artist = std::move(s);
+                } else if (std::strcmp(key, "xesam:album") == 0) {
+                    std::string s = read_string_or_string_array(m, vtype);
+                    if (!s.empty()) album = std::move(s);
                 } else if (std::strcmp(key, "mpris:artUrl") == 0 && std::strcmp(vtype, "s") == 0) {
                     if (sd_bus_message_enter_container(m, SD_BUS_TYPE_VARIANT, "s") >= 0) {
                         const char* val = nullptr;
@@ -86,7 +163,8 @@ void parse_metadata_array(sd_bus_message* m, MprisState& st) {
                         }
                         sd_bus_message_exit_container(m);
                     }
-                } else if (std::strcmp(key, "mpris:trackid") == 0 && (std::strcmp(vtype, "o") == 0 || std::strcmp(vtype, "s") == 0)) {
+                } else if (std::strcmp(key, "mpris:trackid") == 0 &&
+                           (std::strcmp(vtype, "o") == 0 || std::strcmp(vtype, "s") == 0)) {
                     if (sd_bus_message_enter_container(m, SD_BUS_TYPE_VARIANT, vtype) >= 0) {
                         const char* val = nullptr;
                         char basic_t = vtype[0];
@@ -95,21 +173,9 @@ void parse_metadata_array(sd_bus_message* m, MprisState& st) {
                         }
                         sd_bus_message_exit_container(m);
                     }
-                } else if (std::strcmp(key, "mpris:length") == 0 && (std::strcmp(vtype, "x") == 0 || std::strcmp(vtype, "t") == 0)) {
-                    if (sd_bus_message_enter_container(m, SD_BUS_TYPE_VARIANT, vtype) >= 0) {
-                        if (vtype[0] == 'x') {
-                            int64_t us = 0;
-                            if (sd_bus_message_read_basic(m, SD_BUS_TYPE_INT64, &us) >= 0 && us > 0) {
-                                st.length_sec = static_cast<double>(us) / 1e6;
-                            }
-                        } else {
-                            uint64_t us = 0;
-                            if (sd_bus_message_read_basic(m, SD_BUS_TYPE_UINT64, &us) >= 0 && us > 0) {
-                                st.length_sec = static_cast<double>(us) / 1e6;
-                            }
-                        }
-                        sd_bus_message_exit_container(m);
-                    }
+                } else if (std::strcmp(key, "mpris:length") == 0) {
+                    double sec = read_numeric_variant_us_to_sec(m, vtype);
+                    if (sec > 0.0) st.length_sec = sec;
                 } else {
                     sd_bus_message_skip(m, "v");
                 }
@@ -120,6 +186,17 @@ void parse_metadata_array(sd_bus_message* m, MprisState& st) {
         sd_bus_message_exit_container(m);
     }
     sd_bus_message_exit_container(m);
+
+    // Fallback artist for web videos / mpv / streams that omit xesam:artist
+    if (st.track_artist.empty()) {
+        if (!album_artist.empty()) {
+            st.track_artist = std::move(album_artist);
+        } else if (!album.empty()) {
+            st.track_artist = std::move(album);
+        } else if (!st.identity.empty()) {
+            st.track_artist = st.identity;
+        }
+    }
 }
 
 int on_dbus_signal(sd_bus_message* /*m*/, void* userdata, sd_bus_error* /*ret_error*/) {
@@ -246,6 +323,20 @@ MprisState DbusMpris::query_player(const std::string& bus_name) {
     };
 
     get_string_prop("org.mpris.MediaPlayer2", "Identity", st.identity);
+    if (st.identity.empty()) {
+        // Fallback identity from bus name (e.g., org.mpris.MediaPlayer2.firefox.instance_1 -> firefox)
+        constexpr std::string_view prefix = "org.mpris.MediaPlayer2.";
+        if (bus_name.starts_with(prefix)) {
+            std::string sub = bus_name.substr(prefix.size());
+            auto dot = sub.find('.');
+            if (dot != std::string::npos) sub.resize(dot);
+            if (!sub.empty()) {
+                sub[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(sub[0])));
+                st.identity = std::move(sub);
+            }
+        }
+    }
+
     get_bool_prop("org.mpris.MediaPlayer2", "CanRaise", st.can_raise);
 
     std::string status;
@@ -258,22 +349,43 @@ MprisState DbusMpris::query_player(const std::string& bus_name) {
         st.shuffle_supported = true;
     }
 
-    sd_bus_error err = SD_BUS_ERROR_NULL;
-    int64_t pos_us = 0;
-    if (sd_bus_get_property_trivial(
-            bus_,
-            bus_name.c_str(),
-            "/org/mpris/MediaPlayer2",
-            "org.mpris.MediaPlayer2.Player",
-            "Position",
-            &err,
-            'x',
-            &pos_us
-        ) >= 0) {
-        st.position_sec = std::max(0.0, static_cast<double>(pos_us) / 1e6);
+    // Read Position (handles int64, uint64, int32, double)
+    {
+        sd_bus_error err = SD_BUS_ERROR_NULL;
+        sd_bus_message* pos_reply = nullptr;
+        int64_t pos_us = 0;
+        if (sd_bus_get_property_trivial(
+                bus_,
+                bus_name.c_str(),
+                "/org/mpris/MediaPlayer2",
+                "org.mpris.MediaPlayer2.Player",
+                "Position",
+                &err,
+                'x',
+                &pos_us
+            ) >= 0) {
+            st.position_sec = std::max(0.0, static_cast<double>(pos_us) / 1e6);
+        } else {
+            sd_bus_error_free(&err);
+            uint64_t upos_us = 0;
+            if (sd_bus_get_property_trivial(
+                    bus_,
+                    bus_name.c_str(),
+                    "/org/mpris/MediaPlayer2",
+                    "org.mpris.MediaPlayer2.Player",
+                    "Position",
+                    &err,
+                    't',
+                    &upos_us
+                ) >= 0) {
+                st.position_sec = static_cast<double>(upos_us) / 1e6;
+            }
+        }
+        sd_bus_error_free(&err);
+        if (pos_reply) sd_bus_message_unref(pos_reply);
     }
-    sd_bus_error_free(&err);
 
+    sd_bus_error err = SD_BUS_ERROR_NULL;
     sd_bus_message* reply = nullptr;
     if (sd_bus_get_property(
             bus_,
@@ -301,47 +413,118 @@ void DbusMpris::refresh_players() {
         return;
     }
 
-    std::vector<std::string> player_names;
+    std::vector<std::string> raw_player_names;
+    bool has_playerctld = false;
     for (char** p = names; *p; ++p) {
         std::string_view sv(*p);
-        if (sv.starts_with("org.mpris.MediaPlayer2.")) {
-            player_names.emplace_back(sv);
+        if (sv == "org.mpris.MediaPlayer2.playerctld") {
+            has_playerctld = true;
+        } else if (sv.starts_with("org.mpris.MediaPlayer2.")) {
+            raw_player_names.emplace_back(sv);
         }
         std::free(*p);
     }
     std::free(names);
 
+    if (raw_player_names.empty() && has_playerctld) {
+        raw_player_names.emplace_back("org.mpris.MediaPlayer2.playerctld");
+    }
+
     std::vector<MprisState> players;
-    players.reserve(player_names.size());
-    for (const auto& name : player_names) {
+    players.reserve(raw_player_names.size());
+    for (const auto& name : raw_player_names) {
         players.push_back(query_player(name));
     }
 
-    // Selection logic matching PersonaMusicWidget.qml:
-    // 1. First playing player
-    // 2. Identity == "Spotify"
-    // 3. First player in list
+    // Universal media player selection logic (all browsers, mpv, VLC, MPD, Spotify, etc.):
+    // 1. Keep last_active_bus_name_ if it is currently Playing and has a title
+    // 2. First Playing player with a non-empty track_title
+    // 3. First Playing player (even if track_title is empty)
+    // 4. Last active player (last_active_bus_name_) if still present (so pausing a player stays on that player)
+    // 5. First Paused/Stopped player with a non-empty track_title
+    // 6. First available player
     MprisState chosen{};
-    for (const auto& p : players) {
-        if (p.is_playing) {
-            chosen = p;
-            break;
-        }
-    }
-    if (!chosen.has_player) {
+
+    if (!last_active_bus_name_.empty()) {
         for (const auto& p : players) {
-            if (p.identity == "Spotify" || p.bus_name.find("spotify") != std::string::npos) {
+            if (p.bus_name == last_active_bus_name_ && p.is_playing && !p.track_title.empty()) {
                 chosen = p;
                 break;
             }
         }
     }
+
+    if (!chosen.has_player) {
+        for (const auto& p : players) {
+            if (p.is_playing && !p.track_title.empty()) {
+                chosen = p;
+                break;
+            }
+        }
+    }
+
+    if (!chosen.has_player) {
+        for (const auto& p : players) {
+            if (p.is_playing) {
+                chosen = p;
+                break;
+            }
+        }
+    }
+
+    if (!chosen.has_player && !last_active_bus_name_.empty()) {
+        for (const auto& p : players) {
+            if (p.bus_name == last_active_bus_name_ && !p.track_title.empty()) {
+                chosen = p;
+                break;
+            }
+        }
+    }
+
+    if (!chosen.has_player) {
+        for (const auto& p : players) {
+            if (!p.track_title.empty()) {
+                chosen = p;
+                break;
+            }
+        }
+    }
+
+    if (!chosen.has_player && !last_active_bus_name_.empty()) {
+        for (const auto& p : players) {
+            if (p.bus_name == last_active_bus_name_) {
+                chosen = p;
+                break;
+            }
+        }
+    }
+
     if (!chosen.has_player && !players.empty()) {
         chosen = players.front();
     }
 
+    if (chosen.has_player) {
+        if (chosen.is_playing || last_active_bus_name_.empty()) {
+            last_active_bus_name_ = chosen.bus_name;
+        } else {
+            bool prev_still_exists = false;
+            for (const auto& p : players) {
+                if (p.bus_name == last_active_bus_name_) {
+                    prev_still_exists = true;
+                    break;
+                }
+            }
+            if (!prev_still_exists) {
+                last_active_bus_name_ = chosen.bus_name;
+            }
+        }
+    } else {
+        last_active_bus_name_.clear();
+    }
+
     const bool changed = (chosen.has_player != state_.has_player) ||
                          (chosen.bus_name != state_.bus_name) ||
+                         (chosen.identity != state_.identity) ||
                          (chosen.track_title != state_.track_title) ||
                          (chosen.track_artist != state_.track_artist) ||
                          (chosen.art_url != state_.art_url) ||
@@ -362,7 +545,17 @@ void DbusMpris::refresh_players() {
 }
 
 void DbusMpris::poll_position() {
-    if (!bus_ || !state_.has_player || !state_.is_playing) return;
+    if (!bus_) return;
+
+    // Every 2 ticks (~1 second), refresh all players so players that don't emit
+    // standard PropertiesChanged signals on /org/mpris/MediaPlayer2 are still detected
+    if (++poll_counter_ >= 2) {
+        poll_counter_ = 0;
+        refresh_players();
+        return;
+    }
+
+    if (!state_.has_player || !state_.is_playing) return;
 
     sd_bus_error err = SD_BUS_ERROR_NULL;
     int64_t pos_us = 0;
@@ -402,11 +595,29 @@ void DbusMpris::update_art_surface(const std::string& url) {
         return;
     }
 
+    // Handle data:image/...;base64,... inline data URLs from web browsers
+    if (url.starts_with("data:image/")) {
+        auto comma = url.find(',');
+        if (comma != std::string::npos && comma + 1 < url.size()) {
+            gsize out_len = 0;
+            guchar* decoded = g_base64_decode(url.c_str() + comma + 1, &out_len);
+            if (decoded && out_len > 0) {
+                std::vector<uint8_t> data(decoded, decoded + out_len);
+                g_free(decoded);
+                art_surface_ = load_image_surface_from_memory(data);
+                return;
+            }
+            if (decoded) g_free(decoded);
+        }
+        return;
+    }
+
     if (url.starts_with("http://") || url.starts_with("https://")) {
         CURL* curl = curl_easy_init();
         if (!curl) return;
         std::vector<uint8_t> data;
         curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+        curl_easy_setopt(curl, CURLOPT_USERAGENT, "Mozilla/5.0 (X11; Linux x86_64) PersonaRice/2.0");
         curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
         curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, 2500L);
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_cb);
@@ -421,6 +632,7 @@ void DbusMpris::update_art_surface(const std::string& url) {
 
 void DbusMpris::toggle_playing() {
     if (!bus_ || !state_.has_player) return;
+    last_active_bus_name_ = state_.bus_name;
     sd_bus_error err = SD_BUS_ERROR_NULL;
     sd_bus_call_method(
         bus_,
@@ -438,6 +650,7 @@ void DbusMpris::toggle_playing() {
 
 void DbusMpris::next() {
     if (!bus_ || !state_.has_player) return;
+    last_active_bus_name_ = state_.bus_name;
     sd_bus_error err = SD_BUS_ERROR_NULL;
     sd_bus_call_method(
         bus_,
@@ -455,6 +668,7 @@ void DbusMpris::next() {
 
 void DbusMpris::previous() {
     if (!bus_ || !state_.has_player) return;
+    last_active_bus_name_ = state_.bus_name;
     sd_bus_error err = SD_BUS_ERROR_NULL;
     sd_bus_call_method(
         bus_,
@@ -472,12 +686,14 @@ void DbusMpris::previous() {
 
 void DbusMpris::seek_to_fraction(double fraction) {
     if (!bus_ || !state_.has_player || !state_.can_seek || state_.length_sec <= 0.0) return;
+    last_active_bus_name_ = state_.bus_name;
     fraction = std::clamp(fraction, 0.0, 1.0);
     const int64_t target_us = static_cast<int64_t>(state_.length_sec * fraction * 1e6);
 
     sd_bus_error err = SD_BUS_ERROR_NULL;
+    int r = -1;
     if (!state_.track_id.empty() && state_.track_id.starts_with("/")) {
-        sd_bus_call_method(
+        r = sd_bus_call_method(
             bus_,
             state_.bus_name.c_str(),
             "/org/mpris/MediaPlayer2",
@@ -489,7 +705,9 @@ void DbusMpris::seek_to_fraction(double fraction) {
             state_.track_id.c_str(),
             target_us
         );
-    } else {
+        sd_bus_error_free(&err);
+    }
+    if (r < 0) {
         int64_t offset_us = target_us - static_cast<int64_t>(state_.position_sec * 1e6);
         sd_bus_call_method(
             bus_,
@@ -502,14 +720,15 @@ void DbusMpris::seek_to_fraction(double fraction) {
             "x",
             offset_us
         );
+        sd_bus_error_free(&err);
     }
-    sd_bus_error_free(&err);
     state_.position_sec = state_.length_sec * fraction;
     if (on_state_changed_) on_state_changed_();
 }
 
 void DbusMpris::toggle_shuffle() {
     if (!bus_ || !state_.has_player || !state_.shuffle_supported) return;
+    last_active_bus_name_ = state_.bus_name;
     const int new_val = state_.shuffle ? 0 : 1;
     sd_bus_error err = SD_BUS_ERROR_NULL;
     sd_bus_set_property(
@@ -544,4 +763,3 @@ void DbusMpris::raise() {
 }
 
 } // namespace p5
-

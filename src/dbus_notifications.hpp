@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -22,6 +23,10 @@ struct ControlCallbacks {
     std::function<std::string()> get_profile;
     std::function<void()> on_dismiss_all;
     std::function<void(bool)> on_set_music_visible;
+    std::function<void()> on_toggle_music;
+    std::function<void()> on_play_pause;
+    std::function<void()> on_next;
+    std::function<void()> on_prev;
 };
 
 class DbusNotifications {
@@ -40,22 +45,34 @@ public:
 
     void process_primary();
     void process_monitor();
+    void try_claim_notifications_name();
 
-    // Used by internal callbacks
+    // Deduplicate (sender, cookie) across primary server + BecomeMonitor
+    bool mark_seen_message(sd_bus_message* m);
+
     const ControlCallbacks& callbacks() const { return callbacks_; }
     uint32_t next_id() { return ++last_id_; }
 
 private:
+    struct SeenMsg {
+        std::string sender;
+        uint64_t cookie = 0;
+    };
+
     ControlCallbacks callbacks_;
     sd_bus* bus_ = nullptr;
     sd_bus* monitor_bus_ = nullptr;
     sd_bus_slot* vtable_slot_ = nullptr;
     sd_bus_slot* fallback_notif_slot_ = nullptr;
+    sd_bus_slot* owner_changed_slot_ = nullptr;
     sd_bus_slot* monitor_filter_slot_ = nullptr;
     uint32_t last_id_ = 100;
+    bool owns_notif_name_ = false;
+
+    std::array<SeenMsg, 16> seen_msgs_{};
+    size_t seen_idx_ = 0;
 
     bool setup_monitor_bus();
 };
 
 } // namespace p5
-

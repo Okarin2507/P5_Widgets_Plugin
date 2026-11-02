@@ -1,10 +1,16 @@
-# Umbriel Configuration for Persona 5 Notifications & Music Widget
+# Umbriel Configuration — Persona 5 Notifications & Futaba Music Widget
 
-File [`config.toml`](file:///home/okarin/Projects/Personal/Persona%205/Persona-rice-main/umbriel/config.toml) chỉ giữ lại đúng các cấu hình phục vụ cho **Persona 5 Notification Banners (`p5notify`)** và **Futaba Music Widget (`personaMusic`)** trên Umbriel:
+File [`config.toml`](file:///home/okarin/Projects/Personal/Persona%205/Persona-rice-main/umbriel/config.toml) chỉ cấu hình đúng 2 phần cần thiết cho **Thông báo Persona 5 (`p5notify`)** và **Widget Âm nhạc Futaba (`personaMusic`)**, **không định nghĩa bảng `[keybinds]`** để giữ nguyên 100% các phím tắt mặc định/cá nhân của Umbriel:
 
-1. **`[general]`**: Tự động khởi chạy `noctalia` và daemon C++ `p5-rice-daemon`.
-2. **`[[layer_rule]]`**: Rule cho 2 layer surface `noctalia-p5notify` và `noctalia-desktop-widget-personaMusic`.
-3. **`[keybinds]`**: Chỉ giữ các phím tắt điều khiển thông báo P5 và trình phát nhạc:
-   - `Mod+Shift+M`: Chuyển đổi profile (`p5-profile-switcher --cycle`)
-   - `Mod+Shift+N`: Xóa nhanh các banner thông báo P5 đang hiển thị (`p5-rice-ctl dismiss-all`)
-   - `XF86AudioPlay` / `XF86AudioNext` / `XF86AudioPrev`: Điều khiển phát nhạc MPRIS hiển thị trên widget Futaba.
+1. **Autostart (`[general]`)**: Tự khởi động `noctalia` và `p5-rice-daemon`.
+2. **Layer Rule (`[[layer_rule]]`)**: Tắt blur của compositor cho layer `noctalia-p5notify` và `noctalia-desktop-widget-personaMusic` để giữ nguyên góc nghiêng comic trong suốt của Cairo.
+
+## Tích hợp vào Umbriel hiện có của bạn
+
+Bạn chỉ cần thêm `p5-rice-daemon` vào `autostart` và thêm `[[layer_rule]]` vào `~/.config/umbriel/config.toml`:
+
+```toml
+[[layer_rule]]
+match.namespace = "^noctalia-(p5notify|desktop-widget-personaMusic)$"
+blur = false
+```

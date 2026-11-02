@@ -31,7 +31,7 @@ bool parse_freedesktop_notify_message(sd_bus_message* m, NotificationEvent& out)
     r = sd_bus_message_skip(m, "as");
     if (r < 0) return true;
 
-    // Read hints dictionary "a{sv}" to extract urgency
+    // Read hints dictionary "a{sv}" to extract urgency (and desktop-entry if app_name is empty)
     r = sd_bus_message_enter_container(m, SD_BUS_TYPE_ARRAY, "{sv}");
     if (r >= 0) {
         while (sd_bus_message_enter_container(m, SD_BUS_TYPE_DICT_ENTRY, "sv") > 0) {
@@ -67,6 +67,20 @@ bool parse_freedesktop_notify_message(sd_bus_message* m, NotificationEvent& out)
                     } else {
                         sd_bus_message_skip(m, "v");
                     }
+                } else if (std::strcmp(key, "desktop-entry") == 0 && out.app_name.empty()) {
+                    const char* contents = nullptr;
+                    if (sd_bus_message_peek_type(m, nullptr, &contents) >= 0 && contents &&
+                        std::strcmp(contents, "s") == 0) {
+                        if (sd_bus_message_enter_container(m, SD_BUS_TYPE_VARIANT, "s") >= 0) {
+                            const char* de = nullptr;
+                            if (sd_bus_message_read_basic(m, SD_BUS_TYPE_STRING, &de) >= 0 && de) {
+                                out.app_name = de;
+                            }
+                            sd_bus_message_exit_container(m);
+                        }
+                    } else {
+                        sd_bus_message_skip(m, "v");
+                    }
                 } else {
                     sd_bus_message_skip(m, "v");
                 }
@@ -85,9 +99,15 @@ bool parse_freedesktop_notify_message(sd_bus_message* m, NotificationEvent& out)
 
 int monitor_filter_cb(sd_bus_message* m, void* userdata, sd_bus_error* /*ret_error*/) {
     auto* self = static_cast<DbusNotifications*>(userdata);
-    if (!self || !m) return 0;
+    // IMPORTANT: Always return 1 on monitor_bus_ so sd-bus NEVER falls through to
+    // bus_process_object() and NEVER attempts to send an UnknownObject reply on a
+    // read-only BecomeMonitor connection (which causes dbus-broker to disconnect it).
+    if (!self || !m) return 1;
 
     if (sd_bus_message_is_method_call(m, "org.freedesktop.Notifications", "Notify") > 0) {
+        if (!self->mark_seen_message(m)) {
+            return 1;
+        }
         NotificationEvent ev;
         if (parse_freedesktop_notify_message(m, ev)) {
             if (ev.id == 0) {
@@ -96,6 +116,21 @@ int monitor_filter_cb(sd_bus_message* m, void* userdata, sd_bus_error* /*ret_err
             if (self->callbacks().on_notification) {
                 self->callbacks().on_notification(ev);
             }
+        }
+    }
+    return 1;
+}
+
+int on_notif_owner_changed(sd_bus_message* m, void* userdata, sd_bus_error* /*ret_error*/) {
+    auto* self = static_cast<DbusNotifications*>(userdata);
+    if (!self || !m) return 0;
+    const char* name = nullptr;
+    const char* old_owner = nullptr;
+    const char* new_owner = nullptr;
+    if (sd_bus_message_read(m, "sss", &name, &old_owner, &new_owner) >= 0 && name) {
+        if (std::strcmp(name, "org.freedesktop.Notifications") == 0 &&
+            (!new_owner || *new_owner == '\0')) {
+            self->try_claim_notifications_name();
         }
     }
     return 0;
@@ -164,6 +199,38 @@ int method_set_music_visible(sd_bus_message* m, void* userdata, sd_bus_error* /*
     return sd_bus_reply_method_return(m, "");
 }
 
+int method_toggle_music(sd_bus_message* m, void* userdata, sd_bus_error* /*ret_error*/) {
+    auto* self = static_cast<DbusNotifications*>(userdata);
+    if (self->callbacks().on_toggle_music) {
+        self->callbacks().on_toggle_music();
+    }
+    return sd_bus_reply_method_return(m, "");
+}
+
+int method_play_pause(sd_bus_message* m, void* userdata, sd_bus_error* /*ret_error*/) {
+    auto* self = static_cast<DbusNotifications*>(userdata);
+    if (self->callbacks().on_play_pause) {
+        self->callbacks().on_play_pause();
+    }
+    return sd_bus_reply_method_return(m, "");
+}
+
+int method_next(sd_bus_message* m, void* userdata, sd_bus_error* /*ret_error*/) {
+    auto* self = static_cast<DbusNotifications*>(userdata);
+    if (self->callbacks().on_next) {
+        self->callbacks().on_next();
+    }
+    return sd_bus_reply_method_return(m, "");
+}
+
+int method_prev(sd_bus_message* m, void* userdata, sd_bus_error* /*ret_error*/) {
+    auto* self = static_cast<DbusNotifications*>(userdata);
+    if (self->callbacks().on_prev) {
+        self->callbacks().on_prev();
+    }
+    return sd_bus_reply_method_return(m, "");
+}
+
 const sd_bus_vtable kPersonaRiceVtable[] = {
     SD_BUS_VTABLE_START(0),
     SD_BUS_METHOD("Notify", "sssui", "u", method_notify, SD_BUS_VTABLE_UNPRIVILEGED),
@@ -171,20 +238,35 @@ const sd_bus_vtable kPersonaRiceVtable[] = {
     SD_BUS_METHOD("GetProfile", "", "s", method_get_profile, SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_METHOD("DismissAll", "", "", method_dismiss_all, SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_METHOD("SetMusicVisible", "b", "", method_set_music_visible, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("ToggleMusic", "", "", method_toggle_music, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("PlayPause", "", "", method_play_pause, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("Next", "", "", method_next, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("Prev", "", "", method_prev, SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_VTABLE_END,
 };
 
-// Fallback org.freedesktop.Notifications server in case Noctalia is not running
+// Standard org.freedesktop.Notifications server implementation (for Discord, browsers, notify-send, etc.)
 int fd_get_capabilities(sd_bus_message* m, void* /*userdata*/, sd_bus_error* /*ret_error*/) {
-    return sd_bus_reply_method_return(m, "as", 2, "body", "body-markup");
+    return sd_bus_reply_method_return(
+        m,
+        "as",
+        6,
+        "actions",
+        "body",
+        "body-hyperlinks",
+        "body-markup",
+        "icon-static",
+        "persistence"
+    );
 }
 
 int fd_notify(sd_bus_message* m, void* userdata, sd_bus_error* /*ret_error*/) {
     auto* self = static_cast<DbusNotifications*>(userdata);
+    const bool first_time = self->mark_seen_message(m);
     NotificationEvent ev;
     if (parse_freedesktop_notify_message(m, ev)) {
         if (ev.id == 0) ev.id = self->next_id();
-        if (self->callbacks().on_notification) {
+        if (first_time && self->callbacks().on_notification) {
             self->callbacks().on_notification(ev);
         }
     } else {
@@ -194,6 +276,19 @@ int fd_notify(sd_bus_message* m, void* userdata, sd_bus_error* /*ret_error*/) {
 }
 
 int fd_close_notification(sd_bus_message* m, void* /*userdata*/, sd_bus_error* /*ret_error*/) {
+    uint32_t id = 0;
+    sd_bus_message_read(m, "u", &id);
+    if (sd_bus* bus = sd_bus_message_get_bus(m)) {
+        sd_bus_emit_signal(
+            bus,
+            "/org/freedesktop/Notifications",
+            "org.freedesktop.Notifications",
+            "NotificationClosed",
+            "uu",
+            id,
+            3u
+        );
+    }
     return sd_bus_reply_method_return(m, "");
 }
 
@@ -207,6 +302,8 @@ const sd_bus_vtable kFreedesktopNotifVtable[] = {
     SD_BUS_METHOD("Notify", "susssasa{sv}i", "u", fd_notify, SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_METHOD("CloseNotification", "u", "", fd_close_notification, SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_METHOD("GetServerInformation", "", "ssss", fd_get_server_info, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_SIGNAL("NotificationClosed", "uu", 0),
+    SD_BUS_SIGNAL("ActionInvoked", "us", 0),
     SD_BUS_VTABLE_END,
 };
 
@@ -217,6 +314,35 @@ DbusNotifications::DbusNotifications(ControlCallbacks callbacks)
 
 DbusNotifications::~DbusNotifications() {
     stop();
+}
+
+bool DbusNotifications::mark_seen_message(sd_bus_message* m) {
+    if (!m) return false;
+    const char* sender = sd_bus_message_get_sender(m);
+    uint64_t cookie = 0;
+    sd_bus_message_get_cookie(m, &cookie);
+    if (!sender || cookie == 0) return true;
+
+    for (const auto& item : seen_msgs_) {
+        if (item.cookie == cookie && item.sender == sender) {
+            return false; // Already processed
+        }
+    }
+    seen_msgs_[seen_idx_] = SeenMsg{sender, cookie};
+    seen_idx_ = (seen_idx_ + 1) % seen_msgs_.size();
+    return true;
+}
+
+void DbusNotifications::try_claim_notifications_name() {
+    if (!bus_) return;
+    int r = sd_bus_request_name(
+        bus_,
+        "org.freedesktop.Notifications",
+        SD_BUS_NAME_REPLACE_EXISTING | SD_BUS_NAME_ALLOW_REPLACEMENT
+    );
+    if (r >= 0) {
+        owns_notif_name_ = true;
+    }
 }
 
 bool DbusNotifications::start() {
@@ -240,59 +366,58 @@ bool DbusNotifications::start() {
 
     sd_bus_request_name(bus_, "dev.noctalia.PersonaRice", SD_BUS_NAME_REPLACE_EXISTING);
 
-    // Attempt to set up the BecomeMonitor bus so we passively observe all
-    // org.freedesktop.Notifications.Notify calls while Noctalia owns the service.
-    if (!setup_monitor_bus()) {
-        // Fallback: also register /org/freedesktop/Notifications in case no server is running
-        sd_bus_add_object_vtable(
-            bus_,
-            &fallback_notif_slot_,
-            "/org/freedesktop/Notifications",
-            "org.freedesktop.Notifications",
-            kFreedesktopNotifVtable,
-            this
-        );
-        sd_bus_request_name(bus_, "org.freedesktop.Notifications", 0);
-    }
+    // ALWAYS register /org/freedesktop/Notifications on primary bus so we can serve
+    // Discord, browsers, and notify-send directly when Noctalia's notification daemon is disabled,
+    // and also claim it immediately if available.
+    sd_bus_add_object_vtable(
+        bus_,
+        &fallback_notif_slot_,
+        "/org/freedesktop/Notifications",
+        "org.freedesktop.Notifications",
+        kFreedesktopNotifVtable,
+        this
+    );
+    try_claim_notifications_name();
+
+    // Watch NameOwnerChanged so if Noctalia releases org.freedesktop.Notifications after
+    // `noctalia msg config-set notification.enable_daemon false`, we claim it immediately.
+    sd_bus_match_signal(
+        bus_,
+        &owner_changed_slot_,
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "NameOwnerChanged",
+        on_notif_owner_changed,
+        this
+    );
+
+    // Also set up BecomeMonitor bus so even if another daemon owns org.freedesktop.Notifications,
+    // we passively intercept every Notify call from Discord and all desktop apps.
+    setup_monitor_bus();
 
     sd_bus_flush(bus_);
     return true;
 }
 
 bool DbusNotifications::setup_monitor_bus() {
-    int r = sd_bus_new(&monitor_bus_);
-    if (r < 0) return false;
-
-    r = sd_bus_set_bus_client(monitor_bus_, true);
-    if (r < 0) {
+    if (monitor_filter_slot_) {
+        sd_bus_slot_unref(monitor_filter_slot_);
+        monitor_filter_slot_ = nullptr;
+    }
+    if (monitor_bus_) {
         sd_bus_unref(monitor_bus_);
+        monitor_bus_ = nullptr;
+    }
+
+    if (sd_bus_open_user(&monitor_bus_) < 0 || !monitor_bus_) {
         monitor_bus_ = nullptr;
         return false;
     }
 
-    const char* addr = nullptr;
-    if (sd_bus_get_address(bus_, &addr) >= 0 && addr) {
-        sd_bus_set_address(monitor_bus_, addr);
-    } else {
-        sd_bus_unref(monitor_bus_);
-        monitor_bus_ = nullptr;
-        if (sd_bus_open_user(&monitor_bus_) < 0) {
-            monitor_bus_ = nullptr;
-            return false;
-        }
-    }
-
-    if (addr) {
-        if (sd_bus_start(monitor_bus_) < 0) {
-            sd_bus_unref(monitor_bus_);
-            monitor_bus_ = nullptr;
-            return false;
-        }
-    }
-
     sd_bus_error err = SD_BUS_ERROR_NULL;
     sd_bus_message* reply = nullptr;
-    r = sd_bus_call_method(
+    int r = sd_bus_call_method(
         monitor_bus_,
         "org.freedesktop.DBus",
         "/org/freedesktop/DBus",
@@ -328,6 +453,10 @@ void DbusNotifications::stop() {
         sd_bus_unref(monitor_bus_);
         monitor_bus_ = nullptr;
     }
+    if (owner_changed_slot_) {
+        sd_bus_slot_unref(owner_changed_slot_);
+        owner_changed_slot_ = nullptr;
+    }
     if (fallback_notif_slot_) {
         sd_bus_slot_unref(fallback_notif_slot_);
         fallback_notif_slot_ = nullptr;
@@ -357,8 +486,15 @@ void DbusNotifications::process_primary() {
 
 void DbusNotifications::process_monitor() {
     if (!monitor_bus_) return;
-    while (sd_bus_process(monitor_bus_, nullptr) > 0) {}
+    for (;;) {
+        int r = sd_bus_process(monitor_bus_, nullptr);
+        if (r < 0) {
+            // Reconnect monitor bus if it was closed
+            setup_monitor_bus();
+            break;
+        }
+        if (r == 0) break;
+    }
 }
 
 } // namespace p5
-

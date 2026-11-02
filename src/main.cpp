@@ -5,6 +5,7 @@
 #include "p5notify_surface.hpp"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 
+#include <algorithm>
 #include <atomic>
 #include <csignal>
 #include <cstring>
@@ -16,6 +17,7 @@
 #include <sys/inotify.h>
 #include <sys/timerfd.h>
 #include <unistd.h>
+#include <vector>
 #include <wayland-client.h>
 #include <wayland-cursor.h>
 
@@ -26,6 +28,22 @@ std::atomic<bool> g_running{true};
 void sig_handler(int /*sig*/) {
     g_running.store(false);
 }
+
+struct OutputSlot {
+    uint32_t registry_name = 0;
+    wl_output* output = nullptr;
+    std::unique_ptr<p5::P5NotifySurface> notify_surface;
+    std::unique_ptr<p5::P5MusicSurface> music_surface;
+
+    ~OutputSlot() {
+        music_surface.reset();
+        notify_surface.reset();
+        if (output) {
+            wl_output_destroy(output);
+            output = nullptr;
+        }
+    }
+};
 
 struct DaemonContext {
     wl_display* display = nullptr;
@@ -39,11 +57,18 @@ struct DaemonContext {
     wl_cursor_theme* cursor_theme = nullptr;
     wl_surface* cursor_surface = nullptr;
 
-    std::unique_ptr<p5::P5NotifySurface> notify_surface;
-    std::unique_ptr<p5::P5MusicSurface> music_surface;
+    bool enable_notify = true;
+    bool enable_music = true;
+    bool surfaces_ready = false;
+    bool music_visible = true;
+    std::string active_profile = "persona";
+    uint64_t next_notif_uid = 1;
+
+    p5::LoadedFonts fonts{};
+    p5::DbusMpris* mpris = nullptr;
     wl_surface* focused_surface = nullptr;
 
-    std::string active_profile = "persona";
+    std::vector<std::unique_ptr<OutputSlot>> outputs;
 
     void set_cursor(uint32_t serial, const char* name) {
         if (!cursor_theme || !cursor_surface || !pointer) return;
@@ -71,15 +96,114 @@ struct DaemonContext {
         wl_surface_commit(cursor_surface);
     }
 
+    void dismiss_uid_all_outputs(uint64_t uid) {
+        for (auto& slot : outputs) {
+            if (slot->notify_surface) {
+                slot->notify_surface->dismiss_uid(uid);
+            }
+        }
+    }
+
+    void init_slot_surfaces(OutputSlot& slot) {
+        if (!compositor || !shm || !layer_shell) return;
+        const bool is_persona = (active_profile == "persona");
+
+        if (enable_notify && !slot.notify_surface) {
+            slot.notify_surface = std::make_unique<p5::P5NotifySurface>(
+                compositor,
+                layer_shell,
+                shm,
+                slot.output,
+                fonts,
+                [this](uint64_t uid) { dismiss_uid_all_outputs(uid); }
+            );
+            slot.notify_surface->init();
+            slot.notify_surface->set_persona_active(is_persona);
+        }
+
+        if (enable_music && mpris && !slot.music_surface) {
+            slot.music_surface = std::make_unique<p5::P5MusicSurface>(
+                compositor,
+                layer_shell,
+                shm,
+                slot.output,
+                mpris,
+                fonts
+            );
+            slot.music_surface->init();
+            slot.music_surface->set_visible(is_persona && music_visible);
+        }
+    }
+
+    void init_all_outputs() {
+        // If compositor hasn't announced any wl_output yet, create a fallback nullptr slot
+        if (outputs.empty()) {
+            auto fallback = std::make_unique<OutputSlot>();
+            fallback->registry_name = 0;
+            fallback->output = nullptr;
+            init_slot_surfaces(*fallback);
+            outputs.push_back(std::move(fallback));
+        } else {
+            for (auto& slot : outputs) {
+                init_slot_surfaces(*slot);
+            }
+        }
+        surfaces_ready = true;
+    }
+
+    p5::P5NotifySurface* find_notify_surface(wl_surface* s) {
+        if (!s) return nullptr;
+        for (auto& slot : outputs) {
+            if (slot->notify_surface && slot->notify_surface->surface() == s) {
+                return slot->notify_surface.get();
+            }
+        }
+        return nullptr;
+    }
+
+    p5::P5MusicSurface* find_music_surface(wl_surface* s) {
+        if (!s) return nullptr;
+        for (auto& slot : outputs) {
+            if (slot->music_surface && slot->music_surface->surface() == s) {
+                return slot->music_surface.get();
+            }
+        }
+        return nullptr;
+    }
+
     void apply_profile(const std::string& prof) {
         if (prof.empty()) return;
+        const bool changed = (active_profile != prof);
         active_profile = prof;
         const bool is_persona = (prof == "persona");
-        if (notify_surface) {
-            notify_surface->set_persona_active(is_persona);
+
+        for (auto& slot : outputs) {
+            if (slot->notify_surface) {
+                slot->notify_surface->set_persona_active(is_persona);
+            }
+            if (slot->music_surface) {
+                slot->music_surface->set_visible(is_persona && music_visible);
+            }
         }
-        if (music_surface) {
-            music_surface->set_visible(is_persona);
+
+        if (changed && enable_notify) {
+            p5::spawn_detached({
+                "noctalia",
+                "msg",
+                "config-set",
+                "notification.enable_daemon",
+                is_persona ? "false" : "true"
+            });
+        }
+    }
+
+    void set_music_widget_visible(bool vis) {
+        music_visible = vis;
+        const bool show = (active_profile == "persona") && music_visible;
+        for (auto& slot : outputs) {
+            if (slot->music_surface) {
+                slot->music_surface->set_visible(show);
+            }
         }
     }
 };
@@ -98,12 +222,12 @@ void pointer_enter(
     const double x = wl_fixed_to_double(surface_x);
     const double y = wl_fixed_to_double(surface_y);
 
-    if (ctx->notify_surface && surface == ctx->notify_surface->surface()) {
+    if (auto* ns = ctx->find_notify_surface(surface)) {
         ctx->set_cursor(serial, "pointer");
-        ctx->notify_surface->on_pointer_motion(x, y);
-    } else if (ctx->music_surface && surface == ctx->music_surface->surface()) {
+        ns->on_pointer_motion(x, y);
+    } else if (auto* ms = ctx->find_music_surface(surface)) {
         ctx->set_cursor(serial, "pointer");
-        ctx->music_surface->on_pointer_motion(x, y);
+        ms->on_pointer_motion(x, y);
     }
 }
 
@@ -115,10 +239,10 @@ void pointer_leave(
 ) {
     auto* ctx = static_cast<DaemonContext*>(data);
     if (!ctx) return;
-    if (ctx->notify_surface && surface == ctx->notify_surface->surface()) {
-        ctx->notify_surface->on_pointer_leave();
-    } else if (ctx->music_surface && surface == ctx->music_surface->surface()) {
-        ctx->music_surface->on_pointer_leave();
+    if (auto* ns = ctx->find_notify_surface(surface)) {
+        ns->on_pointer_leave();
+    } else if (auto* ms = ctx->find_music_surface(surface)) {
+        ms->on_pointer_leave();
     }
     if (ctx->focused_surface == surface) {
         ctx->focused_surface = nullptr;
@@ -136,10 +260,10 @@ void pointer_motion(
     if (!ctx) return;
     const double x = wl_fixed_to_double(surface_x);
     const double y = wl_fixed_to_double(surface_y);
-    if (ctx->notify_surface && ctx->focused_surface == ctx->notify_surface->surface()) {
-        ctx->notify_surface->on_pointer_motion(x, y);
-    } else if (ctx->music_surface && ctx->focused_surface == ctx->music_surface->surface()) {
-        ctx->music_surface->on_pointer_motion(x, y);
+    if (auto* ns = ctx->find_notify_surface(ctx->focused_surface)) {
+        ns->on_pointer_motion(x, y);
+    } else if (auto* ms = ctx->find_music_surface(ctx->focused_surface)) {
+        ms->on_pointer_motion(x, y);
     }
 }
 
@@ -153,10 +277,10 @@ void pointer_button(
 ) {
     auto* ctx = static_cast<DaemonContext*>(data);
     if (!ctx) return;
-    if (ctx->notify_surface && ctx->focused_surface == ctx->notify_surface->surface()) {
-        ctx->notify_surface->on_pointer_button(button, state);
-    } else if (ctx->music_surface && ctx->focused_surface == ctx->music_surface->surface()) {
-        ctx->music_surface->on_pointer_button(button, state);
+    if (auto* ns = ctx->find_notify_surface(ctx->focused_surface)) {
+        ns->on_pointer_button(button, state);
+    } else if (auto* ms = ctx->find_music_surface(ctx->focused_surface)) {
+        ms->on_pointer_button(button, state);
     }
 }
 
@@ -234,10 +358,35 @@ void registry_global(
         ctx->layer_shell = static_cast<zwlr_layer_shell_v1*>(
             wl_registry_bind(registry, name, &zwlr_layer_shell_v1_interface, std::min(version, 4u))
         );
+    } else if (std::strcmp(interface, wl_output_interface.name) == 0) {
+        // Bind every monitor (wl_output) so widgets appear on all screens
+        auto* out = static_cast<wl_output*>(
+            wl_registry_bind(registry, name, &wl_output_interface, std::min(version, 4u))
+        );
+        if (out) {
+            // Remove any fallback nullptr output slot if present
+            std::erase_if(ctx->outputs, [](const std::unique_ptr<OutputSlot>& s) {
+                return s->output == nullptr && s->registry_name == 0;
+            });
+
+            auto slot = std::make_unique<OutputSlot>();
+            slot->registry_name = name;
+            slot->output = out;
+            if (ctx->surfaces_ready) {
+                ctx->init_slot_surfaces(*slot);
+            }
+            ctx->outputs.push_back(std::move(slot));
+        }
     }
 }
 
-void registry_global_remove(void* /*data*/, wl_registry* /*registry*/, uint32_t /*name*/) {}
+void registry_global_remove(void* data, wl_registry* /*registry*/, uint32_t name) {
+    auto* ctx = static_cast<DaemonContext*>(data);
+    if (!ctx) return;
+    std::erase_if(ctx->outputs, [name](const std::unique_ptr<OutputSlot>& s) {
+        return s->registry_name == name;
+    });
+}
 
 constexpr wl_registry_listener kRegistryListener = {
     .global = registry_global,
@@ -255,10 +404,9 @@ void arm_timerfd(int tfd, int64_t interval_ms) {
 } // namespace
 
 int main(int argc, char** argv) {
-    bool enable_notify = true;
-    bool enable_music = true;
-    std::string initial_profile;
+    DaemonContext ctx;
 
+    std::string initial_profile;
     for (int i = 1; i < argc; ++i) {
         std::string_view arg(argv[i]);
         if (arg == "--help" || arg == "-h") {
@@ -273,13 +421,13 @@ int main(int argc, char** argv) {
             return 0;
         }
         if (arg == "--version" || arg == "-v") {
-            std::cout << "p5-rice-daemon 2.0.0 (native C++23 / zwlr-layer-shell-v1)\n";
+            std::cout << "p5-rice-daemon 2.1.0 (native C++23 / multi-monitor zwlr-layer-shell-v1)\n";
             return 0;
         }
         if (arg == "--no-notify") {
-            enable_notify = false;
+            ctx.enable_notify = false;
         } else if (arg == "--no-music") {
-            enable_music = false;
+            ctx.enable_music = false;
         } else if (arg == "--profile" && i + 1 < argc) {
             initial_profile = argv[++i];
         }
@@ -288,7 +436,6 @@ int main(int argc, char** argv) {
     std::signal(SIGINT, sig_handler);
     std::signal(SIGTERM, sig_handler);
 
-    DaemonContext ctx;
     ctx.display = wl_display_connect(nullptr);
     if (!ctx.display) {
         std::cerr << "[p5-rice-daemon] Failed to connect to Wayland display.\n";
@@ -309,45 +456,47 @@ int main(int argc, char** argv) {
     ctx.cursor_theme = wl_cursor_theme_load(nullptr, 24, ctx.shm);
     ctx.cursor_surface = wl_compositor_create_surface(ctx.compositor);
 
-    const p5::LoadedFonts fonts = p5::register_all_custom_fonts();
+    ctx.fonts = p5::register_all_custom_fonts();
     ctx.active_profile = initial_profile.empty() ? p5::read_active_profile() : initial_profile;
 
+    // If persona notifications are enabled, disable Noctalia's built-in notification toast daemon
+    // so Discord and all desktop apps render exclusively through the Persona 5 widget.
+    if (ctx.enable_notify && ctx.active_profile == "persona") {
+        p5::spawn_detached({"noctalia", "msg", "config-set", "notification.enable_daemon", "false"});
+    }
+
     p5::DbusMpris mpris([&]() {
-        if (ctx.music_surface) {
-            ctx.music_surface->on_mpris_updated();
+        for (auto& slot : ctx.outputs) {
+            if (slot->music_surface) {
+                slot->music_surface->on_mpris_updated();
+            }
         }
     });
-    if (enable_music) {
+    ctx.mpris = &mpris;
+    if (ctx.enable_music) {
         mpris.start();
     }
 
-    if (enable_notify) {
-        ctx.notify_surface = std::make_unique<p5::P5NotifySurface>(
-            ctx.compositor,
-            ctx.layer_shell,
-            ctx.shm,
-            fonts
-        );
-        ctx.notify_surface->init();
-    }
-
-    if (enable_music) {
-        ctx.music_surface = std::make_unique<p5::P5MusicSurface>(
-            ctx.compositor,
-            ctx.layer_shell,
-            ctx.shm,
-            &mpris,
-            fonts
-        );
-        ctx.music_surface->init();
-    }
-
-    ctx.apply_profile(ctx.active_profile);
+    ctx.init_all_outputs();
 
     p5::ControlCallbacks cbs;
     cbs.on_notification = [&](const p5::NotificationEvent& ev) {
-        if (ctx.notify_surface) {
-            ctx.notify_surface->push_notification(ev);
+        if (!ctx.enable_notify) return;
+        const uint64_t uid = ctx.next_notif_uid++;
+        std::string summary = p5::strip_markup(ev.summary);
+        std::string app_name = p5::strip_markup(ev.app_name);
+        std::string body = p5::strip_markup(ev.body);
+        std::string tag = (body.empty() && !summary.empty())
+            ? (!app_name.empty() ? app_name : "Notice")
+            : (!summary.empty() ? summary : (!app_name.empty() ? app_name : "Notification"));
+        const int box_idx = p5::P5NotifySurface::pick_box_index_for_tag(tag);
+
+        bool first = true;
+        for (auto& slot : ctx.outputs) {
+            if (slot->notify_surface) {
+                slot->notify_surface->push_notification(ev, uid, box_idx, first);
+                first = false;
+            }
         }
     };
     cbs.on_profile_change = [&](const std::string& prof) {
@@ -359,14 +508,26 @@ int main(int argc, char** argv) {
     };
     cbs.get_profile = [&]() { return ctx.active_profile; };
     cbs.on_dismiss_all = [&]() {
-        if (ctx.notify_surface) {
-            ctx.notify_surface->clear_all();
+        for (auto& slot : ctx.outputs) {
+            if (slot->notify_surface) {
+                slot->notify_surface->clear_all();
+            }
         }
     };
     cbs.on_set_music_visible = [&](bool vis) {
-        if (ctx.music_surface) {
-            ctx.music_surface->set_visible(vis);
-        }
+        ctx.set_music_widget_visible(vis);
+    };
+    cbs.on_toggle_music = [&]() {
+        ctx.set_music_widget_visible(!ctx.music_visible);
+    };
+    cbs.on_play_pause = [&]() {
+        if (ctx.enable_music) mpris.toggle_playing();
+    };
+    cbs.on_next = [&]() {
+        if (ctx.enable_music) mpris.next();
+    };
+    cbs.on_prev = [&]() {
+        if (ctx.enable_music) mpris.previous();
     };
 
     p5::DbusNotifications dbus_notif(std::move(cbs));
@@ -392,6 +553,7 @@ int main(int argc, char** argv) {
     arm_timerfd(tfd, current_timer_interval);
 
     int64_t last_mpris_poll = p5::now_ms();
+    int64_t last_notif_claim = p5::now_ms();
 
     while (g_running.load()) {
         while (wl_display_prepare_read(ctx.display) != 0) {
@@ -429,17 +591,23 @@ int main(int argc, char** argv) {
         }
 
         for (size_t i = 1; i < fds.size(); ++i) {
-            if (!(fds[i].revents & POLLIN)) continue;
+            if (!(fds[i].revents & (POLLIN | POLLHUP | POLLERR))) continue;
             const int fd = fds[i].fd;
             if (fd == tfd) {
                 uint64_t expirations = 0;
                 (void)read(tfd, &expirations, sizeof(expirations));
                 const int64_t now = p5::now_ms();
-                if (ctx.notify_surface) ctx.notify_surface->tick(now);
-                if (ctx.music_surface) ctx.music_surface->tick(now);
+                for (auto& slot : ctx.outputs) {
+                    if (slot->notify_surface) slot->notify_surface->tick(now);
+                    if (slot->music_surface) slot->music_surface->tick(now);
+                }
                 if (now - last_mpris_poll >= 500) {
                     last_mpris_poll = now;
                     mpris.poll_position();
+                }
+                if (ctx.enable_notify && ctx.active_profile == "persona" && now - last_notif_claim >= 2000) {
+                    last_notif_claim = now;
+                    dbus_notif.try_claim_notifications_name();
                 }
             } else if (fd == notif_pfd) {
                 dbus_notif.process_primary();
@@ -456,9 +624,14 @@ int main(int argc, char** argv) {
 
         // Adapt timer rate: 16ms (~60fps) during active animations, 250ms when idle
         const int64_t now = p5::now_ms();
-        const bool animating =
-            (ctx.notify_surface && ctx.notify_surface->is_animating(now)) ||
-            (ctx.music_surface && ctx.music_surface->is_animating(now));
+        bool animating = false;
+        for (const auto& slot : ctx.outputs) {
+            if ((slot->notify_surface && slot->notify_surface->is_animating(now)) ||
+                (slot->music_surface && slot->music_surface->is_animating(now))) {
+                animating = true;
+                break;
+            }
+        }
         const int64_t desired_interval = animating ? 16 : 250;
         if (desired_interval != current_timer_interval) {
             current_timer_interval = desired_interval;
@@ -471,8 +644,7 @@ int main(int argc, char** argv) {
     if (tfd >= 0) close(tfd);
     if (inotify_fd >= 0) close(inotify_fd);
 
-    ctx.music_surface.reset();
-    ctx.notify_surface.reset();
+    ctx.outputs.clear();
 
     if (ctx.cursor_surface) wl_surface_destroy(ctx.cursor_surface);
     if (ctx.cursor_theme) wl_cursor_theme_destroy(ctx.cursor_theme);

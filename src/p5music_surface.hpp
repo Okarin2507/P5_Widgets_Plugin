@@ -19,6 +19,7 @@ public:
         wl_compositor* compositor,
         zwlr_layer_shell_v1* layer_shell,
         wl_shm* shm,
+        wl_output* output,
         DbusMpris* mpris,
         const LoadedFonts& fonts
     );
@@ -69,6 +70,7 @@ private:
     wl_compositor* compositor_ = nullptr;
     zwlr_layer_shell_v1* layer_shell_ = nullptr;
     wl_shm* shm_ = nullptr;
+    wl_output* output_ = nullptr;
     DbusMpris* mpris_ = nullptr;
     LoadedFonts fonts_;
 

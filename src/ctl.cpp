@@ -36,8 +36,12 @@ void print_help() {
               << "Commands:\n"
               << "  profile [slug]                           Get or set active profile (persona, saber, elden-ring)\n"
               << "  notify <summary> [body] [urgency] [ms]   Show a Persona 5 notification banner\n"
-              << "  dismiss-all                              Clear all active Persona 5 banners\n"
+              << "  dismiss | dismiss-all                    Clear all active Persona 5 banners\n"
               << "  music <on|off>                           Show or hide the Futaba desktop music widget\n"
+              << "  toggle-music                             Toggle the Futaba desktop music widget\n"
+              << "  play-pause                               Toggle play/pause on the active media player\n"
+              << "  next                                     Skip to next track on the active media player\n"
+              << "  prev                                     Return to previous track on the active media player\n"
               << "  status                                   Query daemon status and active profile\n";
 }
 
@@ -134,7 +138,7 @@ int main(int argc, char** argv) {
                 exit_code = 1;
             }
         }
-    } else if (cmd == "dismiss-all") {
+    } else if (cmd == "dismiss-all" || cmd == "dismiss") {
         sd_bus_call_method(
             bus,
             "dev.noctalia.PersonaRice",
@@ -164,6 +168,50 @@ int main(int argc, char** argv) {
                 vis
             );
         }
+    } else if (cmd == "toggle-music") {
+        sd_bus_call_method(
+            bus,
+            "dev.noctalia.PersonaRice",
+            "/dev/noctalia/PersonaRice",
+            "dev.noctalia.PersonaRice",
+            "ToggleMusic",
+            &err,
+            &reply,
+            ""
+        );
+    } else if (cmd == "play-pause") {
+        sd_bus_call_method(
+            bus,
+            "dev.noctalia.PersonaRice",
+            "/dev/noctalia/PersonaRice",
+            "dev.noctalia.PersonaRice",
+            "PlayPause",
+            &err,
+            &reply,
+            ""
+        );
+    } else if (cmd == "next") {
+        sd_bus_call_method(
+            bus,
+            "dev.noctalia.PersonaRice",
+            "/dev/noctalia/PersonaRice",
+            "dev.noctalia.PersonaRice",
+            "Next",
+            &err,
+            &reply,
+            ""
+        );
+    } else if (cmd == "prev") {
+        sd_bus_call_method(
+            bus,
+            "dev.noctalia.PersonaRice",
+            "/dev/noctalia/PersonaRice",
+            "dev.noctalia.PersonaRice",
+            "Prev",
+            &err,
+            &reply,
+            ""
+        );
     } else if (cmd == "status") {
         int r = sd_bus_call_method(
             bus,
@@ -194,4 +242,3 @@ int main(int argc, char** argv) {
     sd_bus_unref(bus);
     return exit_code;
 }
-

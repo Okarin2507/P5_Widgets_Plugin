@@ -37,31 +37,17 @@ constexpr zwlr_layer_surface_v1_listener kLayerSurfaceListener = {
     .closed = layer_surface_closed,
 };
 
-int pick_box_index(std::string_view tag) {
-    std::vector<int> candidates;
-    for (size_t i = 0; i < tag.size(); ++i) {
-        unsigned char c = static_cast<unsigned char>(tag[i]);
-        if ((c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) {
-            candidates.push_back(static_cast<int>(i));
-        }
-    }
-    if (candidates.empty()) return 0;
-    static thread_local std::mt19937 rng{std::random_device{}()};
-    std::uniform_int_distribution<size_t> dist(0, candidates.size() - 1);
-    return candidates[dist(rng)];
-}
-
 void compute_card_transform(int64_t age_ms, double& out_tx, double& out_opacity, double& out_angle_deg) {
-    // 0..300ms: x slides from 120 -> 0 with OutBack
+    // Top-Left corner: 0..300ms x slides from -120 -> 0 with OutBack
     if (age_ms <= 0) {
-        out_tx = 120.0;
+        out_tx = -120.0;
         out_opacity = 0.0;
         out_angle_deg = 0.0;
         return;
     }
     if (age_ms < 300) {
         double t = static_cast<double>(age_ms) / 300.0;
-        out_tx = 120.0 * (1.0 - ease_out_back(t));
+        out_tx = -120.0 * (1.0 - ease_out_back(t));
     } else {
         out_tx = 0.0;
     }
@@ -73,12 +59,6 @@ void compute_card_transform(int64_t age_ms, double& out_tx, double& out_opacity,
     }
 
     // Sequential wobble after 300ms:
-    // [300..370]: 0 -> -3.2 (70ms)
-    // [370..450]: -3.2 -> 2.6 (80ms)
-    // [450..530]: 2.6 -> -1.8 (80ms)
-    // [530..610]: -1.8 -> 1.1 (80ms)
-    // [610..690]: 1.1 -> -0.5 (80ms)
-    // [690..770]: -0.5 -> 0.0 (80ms)
     struct Keyframe {
         int64_t t0;
         int64_t t1;
@@ -105,16 +85,34 @@ void compute_card_transform(int64_t age_ms, double& out_tx, double& out_opacity,
 
 } // namespace
 
+int P5NotifySurface::pick_box_index_for_tag(std::string_view tag) {
+    std::vector<int> candidates;
+    for (size_t i = 0; i < tag.size(); ++i) {
+        unsigned char c = static_cast<unsigned char>(tag[i]);
+        if ((c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) {
+            candidates.push_back(static_cast<int>(i));
+        }
+    }
+    if (candidates.empty()) return 0;
+    static thread_local std::mt19937 rng{std::random_device{}()};
+    std::uniform_int_distribution<size_t> dist(0, candidates.size() - 1);
+    return candidates[dist(rng)];
+}
+
 P5NotifySurface::P5NotifySurface(
     wl_compositor* compositor,
     zwlr_layer_shell_v1* layer_shell,
     wl_shm* shm,
-    const LoadedFonts& fonts
+    wl_output* output,
+    const LoadedFonts& fonts,
+    std::function<void(uint64_t)> on_dismiss_uid
 )
     : compositor_(compositor),
       layer_shell_(layer_shell),
       shm_(shm),
-      fonts_(fonts) {
+      output_(output),
+      fonts_(fonts),
+      on_dismiss_uid_(std::move(on_dismiss_uid)) {
     auto b2 = resolve_asset_path("p5notify", "banner2.png");
     banner_img_ = load_image_surface(b2);
     if (!banner_img_) {
@@ -154,7 +152,7 @@ bool P5NotifySurface::init() {
     layer_surface_ = zwlr_layer_shell_v1_get_layer_surface(
         layer_shell_,
         surface_,
-        nullptr,
+        output_,
         ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY,
         "noctalia-p5notify"
     );
@@ -165,11 +163,12 @@ bool P5NotifySurface::init() {
     }
 
     zwlr_layer_surface_v1_add_listener(layer_surface_, &kLayerSurfaceListener, this);
+    // Anchor at Top-Left corner on this monitor
     zwlr_layer_surface_v1_set_anchor(
         layer_surface_,
-        ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP | ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT
+        ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP | ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT
     );
-    zwlr_layer_surface_v1_set_margin(layer_surface_, 14, 14, 0, 0);
+    zwlr_layer_surface_v1_set_margin(layer_surface_, 14, 0, 0, 14);
     zwlr_layer_surface_v1_set_exclusive_zone(layer_surface_, 0);
     zwlr_layer_surface_v1_set_keyboard_interactivity(
         layer_surface_,
@@ -208,13 +207,26 @@ void P5NotifySurface::set_persona_active(bool active) {
     }
 }
 
-void P5NotifySurface::push_notification(const NotificationEvent& ev) {
+void P5NotifySurface::push_notification(
+    const NotificationEvent& ev,
+    uint64_t shared_uid,
+    int shared_box_index,
+    bool trigger_effects
+) {
     if (!persona_active_) return;
 
     std::string summary = strip_markup(ev.summary);
     std::string app_name = strip_markup(ev.app_name);
-    std::string tag = !summary.empty() ? summary : (!app_name.empty() ? app_name : "Notification");
     std::string body = strip_markup(ev.body);
+
+    std::string tag;
+    if (body.empty() && !summary.empty()) {
+        // Single-line notification: put app_name in upper tag strip and summary in large body box
+        tag = !app_name.empty() ? app_name : "Notice";
+        body = std::move(summary);
+    } else {
+        tag = !summary.empty() ? summary : (!app_name.empty() ? app_name : "Notification");
+    }
 
     int32_t timeout_ms = kShowSeconds * 1000;
     if (ev.expire_timeout > 0) {
@@ -230,10 +242,10 @@ void P5NotifySurface::push_notification(const NotificationEvent& ev) {
 
     const int64_t now = now_ms();
     BannerItem item;
-    item.uid = next_uid_++;
+    item.uid = shared_uid;
     item.tag = std::move(tag);
     item.body = std::move(body);
-    item.box_index = pick_box_index(item.tag);
+    item.box_index = (shared_box_index >= 0) ? shared_box_index : pick_box_index_for_tag(item.tag);
     item.timeout_ms = timeout_ms;
     item.elapsed_hover_paused_ms = 0;
     item.created_ms = now;
@@ -241,16 +253,30 @@ void P5NotifySurface::push_notification(const NotificationEvent& ev) {
     item.critical = critical;
 
     banners_.push_front(std::move(item));
-    play_sound_async(sound_path_);
 
-    if (critical) {
+    if (trigger_effects) {
+        play_sound_async(sound_path_);
+        // Always dismiss any stock Noctalia toast popup (for Discord, browsers, notify-send, etc.)
         dismiss_stock_pass_ = 1;
-        next_dismiss_stock_ms_ = now + 30;
+        next_dismiss_stock_ms_ = now + 15;
     }
 
     update_input_region();
     if (configured_) {
         render(now);
+    }
+}
+
+void P5NotifySurface::dismiss_uid(uint64_t uid) {
+    for (auto it = banners_.begin(); it != banners_.end(); ++it) {
+        if (it->uid == uid) {
+            banners_.erase(it);
+            update_input_region();
+            if (configured_) {
+                render(now_ms());
+            }
+            return;
+        }
     }
 }
 
@@ -279,7 +305,7 @@ bool P5NotifySurface::tick(int64_t now) {
         spawn_detached({"noctalia", "msg", "notification-clear-active"});
         if (dismiss_stock_pass_ == 1) {
             dismiss_stock_pass_ = 2;
-            next_dismiss_stock_ms_ = now + 250;
+            next_dismiss_stock_ms_ = now + 120;
         } else {
             dismiss_stock_pass_ = 0;
         }
@@ -317,7 +343,7 @@ bool P5NotifySurface::tick(int64_t now) {
 
 int P5NotifySurface::hit_test_banner(double x, double y) const {
     if (banners_.empty()) return -1;
-    const double col_x = static_cast<double>(width_) - kColMargin - kBannerW;
+    const double col_x = kColMargin;
     if (x < col_x || x > col_x + kBannerW) return -1;
 
     double cur_y = kColMargin;
@@ -346,10 +372,11 @@ void P5NotifySurface::on_pointer_button(uint32_t button, uint32_t state) {
     if (button == BTN_LEFT && state == WL_POINTER_BUTTON_STATE_PRESSED && pointer_inside_) {
         int idx = hit_test_banner(pointer_x_, pointer_y_);
         if (idx >= 0 && static_cast<size_t>(idx) < banners_.size()) {
-            banners_.erase(banners_.begin() + idx);
-            update_input_region();
-            if (configured_) {
-                render(now_ms());
+            const uint64_t uid = banners_[static_cast<size_t>(idx)].uid;
+            if (on_dismiss_uid_) {
+                on_dismiss_uid_(uid);
+            } else {
+                dismiss_uid(uid);
             }
         }
     }
@@ -372,7 +399,7 @@ void P5NotifySurface::update_input_region() {
     if (!compositor_ || !surface_) return;
     wl_region* reg = wl_compositor_create_region(compositor_);
     if (!banners_.empty()) {
-        const int col_x = static_cast<int>(width_ - kColMargin - kBannerW);
+        const int col_x = static_cast<int>(kColMargin);
         const int col_y = static_cast<int>(kColMargin);
         const int col_w = static_cast<int>(kBannerW);
         const int col_h = static_cast<int>(
@@ -400,8 +427,8 @@ void P5NotifySurface::draw_banner_card(
     // Translate to card position + slide-in tx
     cairo_translate(cr, card_x + tx, card_y);
 
-    // Wobble rotation around origin (card.width * 0.7, card.height * 0.5)
-    const double ox = kBannerW * 0.7;
+    // Wobble rotation around origin (card.width * 0.3, card.height * 0.5)
+    const double ox = kBannerW * 0.3;
     const double oy = banner_h_ * 0.5;
     cairo_translate(cr, ox, oy);
     cairo_rotate(cr, angle_deg * std::numbers::pi / 180.0);
@@ -441,7 +468,10 @@ void P5NotifySurface::draw_banner_card(
         const double title_size = fonts_.notify_p5_ready ? 12.0 : 15.0;
         const bool title_bold = !fonts_.notify_p5_ready;
 
-        const size_t b_idx = std::min(static_cast<size_t>( std::max(0, card.box_index)), card.tag.empty() ? 0 : card.tag.size() - 1);
+        const size_t b_idx = std::min(
+            static_cast<size_t>(std::max(0, card.box_index)),
+            card.tag.empty() ? 0 : card.tag.size() - 1
+        );
         const std::string before_str = card.tag.empty() ? "" : card.tag.substr(0, b_idx);
         const std::string boxed_str = card.tag.empty() ? "N" : card.tag.substr(b_idx, 1);
         const std::string after_str = (card.tag.size() > b_idx + 1) ? card.tag.substr(b_idx + 1) : "";
@@ -578,7 +608,7 @@ void P5NotifySurface::render(int64_t now) {
     cairo_restore(cr);
 
     if (persona_active_ && !banners_.empty()) {
-        const double col_x = static_cast<double>(width_) - kColMargin - kBannerW;
+        const double col_x = kColMargin;
         double cur_y = kColMargin;
         for (const auto& card : banners_) {
             draw_banner_card(cr, card, col_x, cur_y, now);
@@ -596,4 +626,3 @@ void P5NotifySurface::render(int64_t now) {
 }
 
 } // namespace p5
-

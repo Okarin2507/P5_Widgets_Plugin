@@ -40,7 +40,7 @@ public:
     int fd() const;
     void process();
 
-    // Poll position when playing (called every 500ms like PersonaMusicWidget.qml Timer)
+    // Poll position and periodically refresh all MPRIS players
     void poll_position();
     void refresh_players();
 
@@ -63,12 +63,13 @@ private:
     sd_bus_slot* seek_slot_ = nullptr;
 
     MprisState state_{};
+    std::string last_active_bus_name_;
     std::string loaded_art_url_;
     cairo_surface_t* art_surface_ = nullptr;
+    int poll_counter_ = 0;
 
     MprisState query_player(const std::string& bus_name);
     void update_art_surface(const std::string& url);
 };
 
 } // namespace p5
-

@@ -62,12 +62,14 @@ P5MusicSurface::P5MusicSurface(
     wl_compositor* compositor,
     zwlr_layer_shell_v1* layer_shell,
     wl_shm* shm,
+    wl_output* output,
     DbusMpris* mpris,
     const LoadedFonts& fonts
 )
     : compositor_(compositor),
       layer_shell_(layer_shell),
       shm_(shm),
+      output_(output),
       mpris_(mpris),
       fonts_(fonts) {
     banner_img_ = load_image_surface(resolve_asset_path("personaMusic", "assets/banner.png"));
@@ -101,7 +103,7 @@ bool P5MusicSurface::init() {
     layer_surface_ = zwlr_layer_shell_v1_get_layer_surface(
         layer_shell_,
         surface_,
-        nullptr,
+        output_,
         ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM,
         "noctalia-desktop-widget-personaMusic"
     );
@@ -114,10 +116,10 @@ bool P5MusicSurface::init() {
     zwlr_layer_surface_v1_add_listener(layer_surface_, &kMusicLayerListener, this);
     zwlr_layer_surface_v1_set_anchor(
         layer_surface_,
-        ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM | ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT
+        ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP | ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT
     );
-    zwlr_layer_surface_v1_set_margin(layer_surface_, 0, 36, 48, 0);
-    zwlr_layer_surface_v1_set_exclusive_zone(layer_surface_, -1);
+    zwlr_layer_surface_v1_set_margin(layer_surface_, 12, 0, 0, 16);
+    zwlr_layer_surface_v1_set_exclusive_zone(layer_surface_, 0);
     zwlr_layer_surface_v1_set_keyboard_interactivity(
         layer_surface_,
         ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE
@@ -648,7 +650,7 @@ void P5MusicSurface::render(int64_t now) {
                 JitterSpec line2;
                 line2.text = st.has_player
                     ? ("by " + (st.track_artist.empty() ? "Unknown artist" : st.track_artist))
-                    : "Open Spotify";
+                    : "Play any media";
                 line2.family = fonts_.music_ux_regular;
                 line2.pixel_size = 32.0;
                 line2.bold = true;

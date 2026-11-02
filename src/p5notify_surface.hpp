@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <deque>
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <wayland-client.h>
 
@@ -32,7 +33,9 @@ public:
         wl_compositor* compositor,
         zwlr_layer_shell_v1* layer_shell,
         wl_shm* shm,
-        const LoadedFonts& fonts
+        wl_output* output,
+        const LoadedFonts& fonts,
+        std::function<void(uint64_t)> on_dismiss_uid = nullptr
     );
     ~P5NotifySurface();
 
@@ -47,8 +50,16 @@ public:
     void set_persona_active(bool active);
     bool persona_active() const { return persona_active_; }
 
-    void push_notification(const NotificationEvent& ev);
+    void push_notification(
+        const NotificationEvent& ev,
+        uint64_t shared_uid,
+        int shared_box_index,
+        bool trigger_effects
+    );
+    void dismiss_uid(uint64_t uid);
     void clear_all();
+
+    static int pick_box_index_for_tag(std::string_view tag);
 
     // Returns true if animations or timers are active and need periodic ticks
     bool tick(int64_t now);
@@ -85,7 +96,9 @@ private:
     wl_compositor* compositor_ = nullptr;
     zwlr_layer_shell_v1* layer_shell_ = nullptr;
     wl_shm* shm_ = nullptr;
+    wl_output* output_ = nullptr;
     LoadedFonts fonts_;
+    std::function<void(uint64_t)> on_dismiss_uid_;
 
     wl_surface* surface_ = nullptr;
     zwlr_layer_surface_v1* layer_surface_ = nullptr;
@@ -103,10 +116,9 @@ private:
     double pointer_x_ = -1.0;
     double pointer_y_ = -1.0;
 
-    uint64_t next_uid_ = 1;
     std::deque<BannerItem> banners_;
 
-    // Critical stock popup dismissal timer state
+    // Stock Noctalia popup dismissal timer state
     int dismiss_stock_pass_ = 0;
     int64_t next_dismiss_stock_ms_ = 0;
 
@@ -117,4 +129,3 @@ private:
 };
 
 } // namespace p5
-

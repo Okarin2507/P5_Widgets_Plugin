@@ -2,10 +2,8 @@
 # Persona 5 Rice — Umbriel Configuration (Notifications & Futaba Music Widget)
 # Reference: https://docs.noctalia.dev/umbriel/
 #
-# You can either include this file from your main ~/.config/umbriel/config.toml:
-#   [include]
-#   files = ["~/.config/umbriel/persona.toml"]
-# or merge the sections below into your existing ~/.config/umbriel/config.toml.
+# NOTE: No [keybinds] table is defined here so Umbriel's built-in / user
+# keybindings remain 100% untouched.
 # ==============================================================================
 
 [general]
@@ -20,18 +18,3 @@ autostart = [
 [[layer_rule]]
 match.namespace = "^noctalia-(p5notify|desktop-widget-personaMusic)$"
 blur = false
-
-# ==============================================================================
-# Keybinds — Persona 5 Notifications & Music Display Only
-# ==============================================================================
-[keybinds]
-# Toggle / Cycle Persona 5 Profile (persona <-> saber <-> elden-ring)
-"Mod+Shift+M" = { action = "spawn p5-profile-switcher --cycle", repeat = false }
-
-# Dismiss all active Persona 5 notification banners
-"Mod+Shift+N" = { action = "spawn p5-rice-ctl dismiss-all", repeat = false }
-
-# Media playback controls for the Futaba Music Widget (MPRIS)
-"XF86AudioPlay" = { action = "spawn noctalia msg media toggle", allow_when_locked = true, repeat = false }
-"XF86AudioNext" = { action = "spawn noctalia msg media next", allow_when_locked = true }
-"XF86AudioPrev" = { action = "spawn noctalia msg media previous", allow_when_locked = true }
