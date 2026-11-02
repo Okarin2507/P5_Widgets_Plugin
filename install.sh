@@ -58,6 +58,13 @@ for p in p5notify personaMusic; do
   fi
 done
 
+# Install bundled Vietnamese-enabled PersonifiedUXRegular.ttf (replaces broken non-ASCII cmap in stock font)
+for p in p5notify personaMusic; do
+  if [ -f "$here/assets/$p/fonts/PersonifiedUXRegular.ttf" ]; then
+    cp -f "$here/assets/$p/fonts/PersonifiedUXRegular.ttf" "$p5_assets_dir/$p/fonts/PersonifiedUXRegular.ttf"
+  fi
+done
+
 # Install Noctalia bridge plugin
 cp -r "$here/noctalia/plugins/persona-rice/." "$noctalia_dir/plugins/schiszo/persona-rice/"
 

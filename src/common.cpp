@@ -103,7 +103,16 @@ std::string strip_markup(std::string_view s) {
     replace_all(out, "&gt;", ">");
     replace_all(out, "&quot;", "\"");
     replace_all(out, "&#39;", "'");
+    replace_all(out, "&apos;", "'");
+    replace_all(out, "&nbsp;", " ");
     replace_all(out, "&amp;", "&");
+
+    if (!out.empty() && g_utf8_validate(out.data(), static_cast<gssize>(out.size()), nullptr)) {
+        if (gchar* norm = g_utf8_normalize(out.data(), static_cast<gssize>(out.size()), G_NORMALIZE_DEFAULT_COMPOSE)) {
+            out.assign(norm);
+            g_free(norm);
+        }
+    }
     return out;
 }
 
@@ -116,19 +125,42 @@ std::string format_mm_ss(double seconds) {
     return buf;
 }
 
+bool is_pure_ascii(std::string_view str) {
+    for (unsigned char c : str) {
+        if (c >= 0x80) return false;
+    }
+    return true;
+}
+
 std::vector<std::string> utf8_split_chars(std::string_view str) {
+    std::string normalized;
+    std::string_view src = str;
+    if (!str.empty() && g_utf8_validate(str.data(), static_cast<gssize>(str.size()), nullptr)) {
+        if (gchar* norm = g_utf8_normalize(str.data(), static_cast<gssize>(str.size()), G_NORMALIZE_DEFAULT_COMPOSE)) {
+            normalized.assign(norm);
+            g_free(norm);
+            src = normalized;
+        }
+    }
+
     std::vector<std::string> result;
-    size_t i = 0;
-    while (i < str.size()) {
-        unsigned char c = static_cast<unsigned char>(str[i]);
-        size_t len = 1;
-        if ((c & 0x80) == 0) len = 1;
-        else if ((c & 0xE0) == 0xC0) len = 2;
-        else if ((c & 0xF0) == 0xE0) len = 3;
-        else if ((c & 0xF8) == 0xF0) len = 4;
-        if (i + len > str.size()) len = str.size() - i;
-        result.emplace_back(str.substr(i, len));
-        i += len;
+    const char* p = src.data();
+    const char* end = src.data() + src.size();
+    while (p < end) {
+        gunichar cp = g_utf8_get_char_validated(p, end - p);
+        if (cp == static_cast<gunichar>(-1) || cp == static_cast<gunichar>(-2)) {
+            result.emplace_back(p, 1);
+            ++p;
+            continue;
+        }
+        const char* next = g_utf8_next_char(p);
+        if (g_unichar_ismark(cp) && !result.empty()) {
+            // Keep combining marks attached to their preceding base character
+            result.back().append(p, static_cast<size_t>(next - p));
+        } else {
+            result.emplace_back(p, static_cast<size_t>(next - p));
+        }
+        p = next;
     }
     return result;
 }

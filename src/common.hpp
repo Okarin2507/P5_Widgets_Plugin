@@ -37,8 +37,9 @@ std::string strip_markup(std::string_view s);
 // Time formatter matching PersonaMusicWidget.qml fmt(s)
 std::string format_mm_ss(double seconds);
 
-// UTF-8 codepoint splitter for per-character Jitter rendering
+// UTF-8 codepoint splitter for per-character Jitter rendering (NFC-normalized & grapheme-aware)
 std::vector<std::string> utf8_split_chars(std::string_view str);
+bool is_pure_ascii(std::string_view str);
 
 // Asset & state path resolution
 std::filesystem::path config_home();

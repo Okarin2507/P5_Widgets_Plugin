@@ -86,10 +86,11 @@ void compute_card_transform(int64_t age_ms, double& out_tx, double& out_opacity,
 } // namespace
 
 int P5NotifySurface::pick_box_index_for_tag(std::string_view tag) {
+    auto chars = utf8_split_chars(tag);
     std::vector<int> candidates;
-    for (size_t i = 0; i < tag.size(); ++i) {
-        unsigned char c = static_cast<unsigned char>(tag[i]);
-        if ((c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) {
+    for (size_t i = 0; i < chars.size(); ++i) {
+        gunichar cp = g_utf8_get_char_validated(chars[i].data(), static_cast<gssize>(chars[i].size()));
+        if (cp != static_cast<gunichar>(-1) && cp != static_cast<gunichar>(-2) && g_unichar_isalnum(cp)) {
             candidates.push_back(static_cast<int>(i));
         }
     }
@@ -464,17 +465,22 @@ void P5NotifySurface::draw_banner_card(
         cairo_rectangle(cr, 0.0, 0.0, tag_box_w, tag_box_h);
         cairo_clip(cr);
 
-        const std::string& title_font = fonts_.notify_p5_ready ? fonts_.notify_p5_main : fonts_.notify_ux_regular;
-        const double title_size = fonts_.notify_p5_ready ? 12.0 : 15.0;
-        const bool title_bold = !fonts_.notify_p5_ready;
+        // Use Persona5main ransom-note font only when the tag is pure ASCII;
+        // for Vietnamese/Unicode tags, use Vietnamese-enabled Personified UX so accents render cleanly.
+        const bool use_p5_main = fonts_.notify_p5_ready && is_pure_ascii(card.tag);
+        const std::string& title_font = use_p5_main ? fonts_.notify_p5_main : fonts_.notify_ux_regular;
+        const double title_size = use_p5_main ? 12.0 : 15.0;
+        const bool title_bold = !use_p5_main;
 
-        const size_t b_idx = std::min(
-            static_cast<size_t>(std::max(0, card.box_index)),
-            card.tag.empty() ? 0 : card.tag.size() - 1
-        );
-        const std::string before_str = card.tag.empty() ? "" : card.tag.substr(0, b_idx);
-        const std::string boxed_str = card.tag.empty() ? "N" : card.tag.substr(b_idx, 1);
-        const std::string after_str = (card.tag.size() > b_idx + 1) ? card.tag.substr(b_idx + 1) : "";
+        auto tag_chars = utf8_split_chars(card.tag);
+        const size_t b_idx = tag_chars.empty()
+            ? 0
+            : std::min(static_cast<size_t>(std::max(0, card.box_index)), tag_chars.size() - 1);
+        std::string before_str;
+        for (size_t i = 0; i < b_idx; ++i) before_str += tag_chars[i];
+        const std::string boxed_str = tag_chars.empty() ? "N" : tag_chars[b_idx];
+        std::string after_str;
+        for (size_t i = b_idx + 1; i < tag_chars.size(); ++i) after_str += tag_chars[i];
 
         PangoFontDescription* desc_norm = pango_font_description_new();
         pango_font_description_set_family(desc_norm, title_font.c_str());
