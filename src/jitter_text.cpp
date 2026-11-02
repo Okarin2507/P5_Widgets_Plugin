@@ -16,7 +16,8 @@ double jitter_rnd(int i, int k, double seed) {
 
 PangoFontDescription* make_font_desc(const std::string& family, double pixel_size, bool bold) {
     PangoFontDescription* desc = pango_font_description_new();
-    pango_font_description_set_family(desc, family.empty() ? "Sans" : family.c_str());
+    const std::string fam_chain = (family.empty() ? "Sans" : family) + ", Noto Color Emoji, Sans";
+    pango_font_description_set_family(desc, fam_chain.c_str());
     pango_font_description_set_absolute_size(desc, pixel_size * PANGO_SCALE);
     pango_font_description_set_weight(desc, bold ? PANGO_WEIGHT_BOLD : PANGO_WEIGHT_NORMAL);
     return desc;

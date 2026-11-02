@@ -146,20 +146,40 @@ std::vector<std::string> utf8_split_chars(std::string_view str) {
     std::vector<std::string> result;
     const char* p = src.data();
     const char* end = src.data() + src.size();
+    bool prev_was_zwj = false;
+    bool prev_was_ri = false;
+
     while (p < end) {
         gunichar cp = g_utf8_get_char_validated(p, end - p);
         if (cp == static_cast<gunichar>(-1) || cp == static_cast<gunichar>(-2)) {
             result.emplace_back(p, 1);
             ++p;
+            prev_was_zwj = false;
+            prev_was_ri = false;
             continue;
         }
         const char* next = g_utf8_next_char(p);
-        if (g_unichar_ismark(cp) && !result.empty()) {
-            // Keep combining marks attached to their preceding base character
+        const bool is_zwj = (cp == 0x200D);
+        const bool is_vs = (cp >= 0xFE00 && cp <= 0xFE0F) || (cp >= 0xE0100 && cp <= 0xE01EF);
+        const bool is_skin_tone = (cp >= 0x1F3FB && cp <= 0x1F3FF);
+        const bool is_ri = (cp >= 0x1F1E6 && cp <= 0x1F1FF);
+        const bool join_with_prev = !result.empty() && (
+            g_unichar_ismark(cp) ||
+            is_zwj ||
+            prev_was_zwj ||
+            is_vs ||
+            is_skin_tone ||
+            (is_ri && prev_was_ri)
+        );
+
+        if (join_with_prev) {
             result.back().append(p, static_cast<size_t>(next - p));
+            prev_was_ri = false; // Pair of 2 regional indicators completes 1 flag
         } else {
             result.emplace_back(p, static_cast<size_t>(next - p));
+            prev_was_ri = is_ri;
         }
+        prev_was_zwj = is_zwj;
         p = next;
     }
     return result;
