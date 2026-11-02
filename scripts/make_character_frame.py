@@ -28,15 +28,16 @@ def generate_p5_character_frame(char_path: Path, template_frame_path: Path, out_
 
     # Precise inner polygon of the dialogue window (inside the inner border)
     poly_inner = [
-        (1010, 52),   # Top vertex
+        (1010, 48),   # Top vertex
         (1258, 365),  # Upper-right corner
         (1235, 640),  # Right corner
         (670, 940),   # Bottom vertex
-        (265, 840),   # Bottom-left corner
-        (155, 470),   # Lower-left corner
-        (170, 248),   # Notch base bottom
-        (91, 212),    # Notch tip (points left)
-        (172, 195),   # Notch base top
+        (290, 840),   # Bottom-left corner
+        (185, 470),   # Lower-left corner
+        (155, 350),   # Mid-left
+        (126, 248),   # Notch base bottom (inner edge of white stripe)
+        (120, 212),   # Notch tip inner
+        (195, 190),   # Notch base top
     ]
 
     # Inner mask
@@ -82,10 +83,20 @@ def generate_p5_character_frame(char_path: Path, template_frame_path: Path, out_
     # Composite: white bg + clipped character
     interior = Image.alpha_composite(bg, char_layer)
 
+    # Clean any headphone residue from template border area
+    t_clean = template.copy()
+    t_arr_clean = np.array(t_clean)
+    for y in range(200, 450):
+        mask = (t_arr_clean[y, :, 0] < 70) & (t_arr_clean[y, :, 1] < 70) & (t_arr_clean[y, :, 2] < 70) & (t_arr_clean[y, :, 3] > 100)
+        for x in range(115, 200):
+            if mask[x]:
+                t_arr_clean[y, x, :3] = 255
+    t_clean = Image.fromarray(t_arr_clean, "RGBA")
+
     # Extract clean frame border from template
     border_mask = np.where((t_alpha > 50) & (np.array(inner_mask) == 0), 255, 0).astype(np.uint8)
     border_layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    border_layer = Image.composite(template, border_layer, Image.fromarray(border_mask, "L"))
+    border_layer = Image.composite(t_clean, border_layer, Image.fromarray(border_mask, "L"))
 
     # Final composition: interior + frame border
     final_frame = Image.alpha_composite(interior, border_layer)
@@ -116,3 +127,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
