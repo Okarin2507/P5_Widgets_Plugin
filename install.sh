@@ -65,6 +65,11 @@ for p in p5notify personaMusic; do
   fi
 done
 
+# Install any custom character frame generated into assets if present
+if [ -f "$here/assets/personaMusic/assets/sumire_frame.png" ]; then
+  cp -f "$here/assets/personaMusic/assets/sumire_frame.png" "$p5_assets_dir/personaMusic/assets/sumire_frame.png"
+fi
+
 # Install Noctalia bridge plugin
 cp -r "$here/noctalia/plugins/persona-rice/." "$noctalia_dir/plugins/schiszo/persona-rice/"
 

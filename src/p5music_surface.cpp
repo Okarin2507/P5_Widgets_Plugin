@@ -76,7 +76,10 @@ P5MusicSurface::P5MusicSurface(
     if (!banner_img_) {
         banner_img_ = create_fallback_music_banner(1223, 344);
     }
-    futaba_img_ = load_image_surface(resolve_asset_path("personaMusic", "assets/futaba_frame.png"));
+    futaba_img_ = load_image_surface(resolve_asset_path("personaMusic", "assets/character_frame.png"));
+    if (!futaba_img_) {
+        futaba_img_ = load_image_surface(resolve_asset_path("personaMusic", "assets/futaba_frame.png"));
+    }
     if (!futaba_img_) {
         futaba_img_ = create_fallback_futaba_frame(352, 272);
     }
