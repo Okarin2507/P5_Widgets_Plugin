@@ -91,6 +91,10 @@ private:
     std::string last_track_title_;
     int64_t track_anim_start_ms_ = 0;
 
+    // Character identity & cutout name tag
+    std::string character_name_ = "Futaba";
+    std::vector<int> character_inv_ = {2};
+
     // Pointer state
     bool pointer_inside_ = false;
     bool pointer_pressed_ = false;

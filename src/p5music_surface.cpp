@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <fstream>
 #include <linux/input-event-codes.h>
 #include <numbers>
 #include <pango/pangocairo.h>
@@ -76,10 +77,40 @@ P5MusicSurface::P5MusicSurface(
     if (!banner_img_) {
         banner_img_ = create_fallback_music_banner(1223, 344);
     }
-    futaba_img_ = load_image_surface(resolve_asset_path("personaMusic", "assets/character_frame.png"));
+
+    auto char_custom_path = resolve_asset_path("personaMusic", "assets/character_frame.png");
+    std::error_code ec;
+    if (std::filesystem::exists(char_custom_path, ec)) {
+        futaba_img_ = load_image_surface(char_custom_path);
+        auto name_file = resolve_asset_path("personaMusic", "assets/character_name");
+        if (std::filesystem::exists(name_file, ec)) {
+            std::ifstream in(name_file);
+            std::string n;
+            if (in >> n && !n.empty()) {
+                character_name_ = n;
+                character_inv_ = {1};
+            }
+        } else {
+            character_name_ = "Sumire";
+            character_inv_ = {1};
+        }
+    }
+
+    if (!futaba_img_) {
+        auto sumire_path = resolve_asset_path("personaMusic", "assets/sumire_frame.png");
+        if (std::filesystem::exists(sumire_path, ec)) {
+            futaba_img_ = load_image_surface(sumire_path);
+            character_name_ = "Sumire";
+            character_inv_ = {1};
+        }
+    }
+
     if (!futaba_img_) {
         futaba_img_ = load_image_surface(resolve_asset_path("personaMusic", "assets/futaba_frame.png"));
+        character_name_ = "Futaba";
+        character_inv_ = {2};
     }
+
     if (!futaba_img_) {
         futaba_img_ = create_fallback_futaba_frame(352, 272);
     }
@@ -602,26 +633,26 @@ void P5MusicSurface::render(int64_t now) {
                 }
             }
 
-            // "Futaba" name tag at (268, 78) rot -15 deg around center
+            // Character name tag at (268, 78) rot -15 deg around center
             {
-                JitterSpec futaba_spec;
-                futaba_spec.text = "Futaba";
-                futaba_spec.family = fonts_.music_ux_regular;
-                futaba_spec.pixel_size = 40.0;
-                futaba_spec.bold = true;
-                futaba_spec.color = {0.0, 0.0, 0.0, 1.0};
-                futaba_spec.jit = 0.9;
-                futaba_spec.seed = 3.0;
-                futaba_spec.inv = {2};
-                futaba_spec.box_color = {0.0, 0.0, 0.0, 1.0};
-                futaba_spec.box_text_color = {1.0, 1.0, 1.0, 1.0};
+                JitterSpec name_spec;
+                name_spec.text = character_name_;
+                name_spec.family = fonts_.music_ux_regular;
+                name_spec.pixel_size = 40.0;
+                name_spec.bold = true;
+                name_spec.color = {0.0, 0.0, 0.0, 1.0};
+                name_spec.jit = 0.9;
+                name_spec.seed = 3.0;
+                name_spec.inv = character_inv_;
+                name_spec.box_color = {0.0, 0.0, 0.0, 1.0};
+                name_spec.box_text_color = {1.0, 1.0, 1.0, 1.0};
 
-                JitterMetrics fm = measure_jitter_text(cr, futaba_spec);
+                JitterMetrics fm = measure_jitter_text(cr, name_spec);
                 cairo_save(cr);
                 cairo_translate(cr, 268.0, 78.0);
                 cairo_rotate(cr, -15.0 * std::numbers::pi / 180.0);
                 cairo_translate(cr, -fm.width * 0.5, -fm.height * 0.5);
-                draw_jitter_text(cr, futaba_spec, &fm);
+                draw_jitter_text(cr, name_spec, &fm);
                 cairo_restore(cr);
             }
 

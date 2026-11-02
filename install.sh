@@ -68,6 +68,7 @@ done
 # Install any custom character frame generated into assets if present
 if [ -f "$here/assets/personaMusic/assets/sumire_frame.png" ]; then
   cp -f "$here/assets/personaMusic/assets/sumire_frame.png" "$p5_assets_dir/personaMusic/assets/sumire_frame.png"
+  cp -f "$here/assets/personaMusic/assets/sumire_frame.png" "$p5_assets_dir/personaMusic/assets/character_frame.png"
 fi
 
 # Install Noctalia bridge plugin
