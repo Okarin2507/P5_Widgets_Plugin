@@ -13,8 +13,8 @@ autostart = [
 ]
 
 # ==============================================================================
-# Layer Rules for Persona 5 Notification Overlay & Futaba Music Desktop Widget
+# Layer Rules for Persona 5 Notification, Calendar & Music Desktop Widget
 # ==============================================================================
 [[layer_rule]]
-match.namespace = "^noctalia-(p5notify|desktop-widget-personaMusic)$"
+match.namespace = "^noctalia-(p5notify|p5calendar|desktop-widget-personaMusic)$"
 blur = false

@@ -1,5 +1,6 @@
 # Build directories
 build/
+build-*/
 builddir/
 cmake-build-*/
 out/
@@ -26,3 +27,4 @@ compile_commands.json
 *.swp
 *.swo
 
+assets/

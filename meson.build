@@ -1,7 +1,7 @@
 project(
   'persona-rice-cpp',
   ['cpp', 'c'],
-  version: '2.0.0',
+  version: '2.1.0',
   license: 'MIT',
   default_options: [
     'cpp_std=c++23',
@@ -26,8 +26,11 @@ pangoft2 = dependency('pangoft2')
 fontconfig = dependency('fontconfig')
 gdk_pixbuf = dependency('gdk-pixbuf-2.0')
 gio = dependency('gio-2.0')
+glib = dependency('glib-2.0')
 libsystemd = dependency('libsystemd')
 libcurl = dependency('libcurl')
+
+src_inc = include_directories('src')
 
 wl_protocols_dir = wayland_protocols.get_variable('pkgdatadir')
 xdg_shell_xml = wl_protocols_dir / 'stable/xdg-shell/xdg-shell.xml'
@@ -68,19 +71,80 @@ protocol_sources = [
   wlr_layer_shell_code,
 ]
 
+# -----------------------------------------------------------------------------
+# Modules
+# -----------------------------------------------------------------------------
+core_lib = static_library(
+  'p5core',
+  [
+    'src/core/common.cpp',
+    'src/core/shm_buffer.cpp',
+    'src/core/image_cache.cpp',
+    'src/core/asset_config.cpp',
+  ],
+  include_directories: src_inc,
+  dependencies: [cairo, pangocairo, pangoft2, fontconfig, gdk_pixbuf, gio],
+)
+
+weather_lib = static_library(
+  'p5weather',
+  ['src/weather/noctalia_weather.cpp', 'src/weather/day_phase.cpp'],
+  include_directories: src_inc,
+)
+
+ipc_lib = static_library(
+  'p5ipc',
+  [
+    'src/ipc/dbus_notifications.cpp',
+    'src/ipc/dbus_mpris.cpp',
+  ],
+  include_directories: src_inc,
+  dependencies: [libsystemd, libcurl, cairo, glib],
+  link_with: core_lib,
+)
+
+notifications_lib = static_library(
+  'p5notifications',
+  ['src/notifications/notification_surface.cpp', wlr_layer_shell_header],
+  include_directories: src_inc,
+  dependencies: [cairo, pangocairo],
+  link_with: core_lib,
+)
+
+music_lib = static_library(
+  'p5music',
+  [
+    'src/music/music_surface.cpp',
+    'src/music/jitter_text.cpp',
+    wlr_layer_shell_header,
+  ],
+  include_directories: src_inc,
+  dependencies: [cairo, pangocairo],
+  link_with: [core_lib, ipc_lib],
+)
+
+calendar_lib = static_library(
+  'p5calendar',
+  ['src/calendar/calendar_surface.cpp', wlr_layer_shell_header],
+  include_directories: src_inc,
+  dependencies: [cairo, pangocairo],
+  link_with: [core_lib, weather_lib],
+)
+
+wallpaper_lib = static_library(
+  'p5wallpaper',
+  ['src/wallpaper/wallpaper_automation.cpp'],
+  include_directories: src_inc,
+  link_with: [core_lib, weather_lib],
+)
+
+# -----------------------------------------------------------------------------
+# Executables
+# -----------------------------------------------------------------------------
 executable(
   'p5-rice-daemon',
-  [
-    'src/main.cpp',
-    'src/common.cpp',
-    'src/shm_buffer.cpp',
-    'src/jitter_text.cpp',
-    'src/dbus_notifications.cpp',
-    'src/dbus_mpris.cpp',
-    'src/p5notify_surface.cpp',
-    'src/p5music_surface.cpp',
-    protocol_sources,
-  ],
+  ['src/app/main.cpp', protocol_sources],
+  include_directories: src_inc,
   dependencies: [
     wayland_client,
     wayland_cursor,
@@ -93,16 +157,21 @@ executable(
     libsystemd,
     libcurl,
   ],
+  link_with: [
+    core_lib,
+    weather_lib,
+    ipc_lib,
+    notifications_lib,
+    music_lib,
+    calendar_lib,
+    wallpaper_lib,
+  ],
   install: true,
 )
 
 executable(
   'p5-rice-ctl',
-  [
-    'src/ctl.cpp',
-  ],
-  dependencies: [
-    libsystemd,
-  ],
+  ['src/app/ctl.cpp'],
+  dependencies: [libsystemd],
   install: true,
 )

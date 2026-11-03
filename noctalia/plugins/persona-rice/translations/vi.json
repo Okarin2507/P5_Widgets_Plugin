@@ -1,7 +1,34 @@
 {
   "settings": {
-    "default_profile": "Hồ sơ mặc định",
-    "music_widget_enabled": "Bật widget nghe nhạc Futaba"
+    "music_widget_enabled": "Bật widget nghe nhạc Futaba",
+    "calendar_widget_enabled": "Bật widget lịch Persona 5",
+    "notification_banner": "Ảnh banner thông báo",
+    "notification_banner.description": "PNG/JPG tuỳ chọn cho banner thông báo. Để trống sẽ dùng ảnh đi kèm.",
+    "notification_sound": "Âm thanh thông báo",
+    "notification_sound.description": "WAV/OGG/MP3 phát khi có thông báo. Để trống sẽ dùng âm thanh giấy đi kèm.",
+    "music_banner": "Ảnh nền widget nhạc",
+    "music_banner.description": "Ảnh nền cho widget nhạc. Để trống sẽ dùng banner đi kèm.",
+    "music_character_frame": "Khung nhân vật",
+    "music_character_frame.description": "Khung chân dung cho widget nhạc. Để trống sẽ dùng khung Futaba/Sumire đi kèm.",
+    "music_character_name": "Tên nhân vật",
+    "music_character_name.description": "Chữ trên name tag. Để trống sẽ giữ tên từ asset đã chọn.",
+    "calendar_assets_dir": "Thư mục asset lịch",
+    "calendar_assets_dir.description": "Thư mục chứa Day, Month, Week, ToD và Weather. Để trống sẽ dùng lịch đi kèm.",
+    "wallpaper_auto_enabled": "Tự đổi wallpaper theo thời gian",
+    "wallpaper_auto_enabled.description": "Chuyển giữa wallpaper ngày, chiều và đêm theo mốc sunrise/sunset.",
+    "wallpaper_day": "Wallpaper ban ngày",
+    "wallpaper_day.description": "Dùng cho buổi sáng/ban ngày. Để trống sẽ dùng assets/p5wallpaper/p5cityday.png.",
+    "wallpaper_afternoon": "Wallpaper buổi chiều",
+    "wallpaper_afternoon.description": "Dùng từ trưa đến chạng vạng. Để trống sẽ dùng assets/p5wallpaper/p5cityafternoon.png.",
+    "wallpaper_night": "Wallpaper ban đêm",
+    "wallpaper_night.description": "Dùng từ chạng vạng đến bình minh. Để trống sẽ dùng assets/p5wallpaper/p5citynight.png.",
+    "notification_font": "Font tiêu đề thông báo",
+    "notification_font.description": "TTF/OTF cho tiêu đề thông báo. Để trống sẽ dùng Persona5main.ttf.",
+    "ui_font": "Font giao diện dùng chung",
+    "ui_font.description": "TTF/OTF cho nội dung thông báo và chữ UI nhạc. Để trống sẽ dùng PersonifiedUXRegular.ttf.",
+    "music_font": "Font nút nhạc",
+    "music_font.description": "TTF/OTF cho các nút nhạc Jitter. Để trống sẽ dùng personafont.ttf.",
+    "respect_noctalia_dnd": "Tôn trọng Do Not Disturb của Noctalia",
+    "respect_noctalia_dnd.description": "Khi DND của Noctalia bật, ẩn banner Persona 5 và âm thanh thông báo."
   }
 }
-

@@ -1,19 +1,19 @@
 id = "schiszo/persona-rice"
 name = "Persona 5 Rice Controller"
-version = "2.0.0"
+version = "2.1.0"
 plugin_api = 3
 author = "schiszo"
-description = "Controls the native C++23 Persona 5 Notification Overlay & Futaba Music Desktop Widget on Umbriel + Noctalia"
-
-[[setting]]
-key = "default_profile"
-label_key = "settings.default_profile"
-type = "string"
-default = "persona"
+description = "Controls the native C++23 Persona 5 notification overlay, multi-monitor calendar and Futaba music widget on Umbriel + Noctalia"
 
 [[setting]]
 key = "music_widget_enabled"
 label_key = "settings.music_widget_enabled"
+type = "bool"
+default = true
+
+[[setting]]
+key = "calendar_widget_enabled"
+label_key = "settings.calendar_widget_enabled"
 type = "bool"
 default = true
 
@@ -24,3 +24,111 @@ entry = "service.luau"
 [[widget]]
 id = "profile"
 entry = "widget.luau"
+
+[[setting]]
+key = "respect_noctalia_dnd"
+label_key = "settings.respect_noctalia_dnd"
+description_key = "settings.respect_noctalia_dnd.description"
+type = "bool"
+default = true
+
+[[setting]]
+key = "notification_banner"
+label_key = "settings.notification_banner"
+description_key = "settings.notification_banner.description"
+type = "file"
+default = ""
+extensions = [".png", ".jpg", ".jpeg", ".webp"]
+
+[[setting]]
+key = "notification_sound"
+label_key = "settings.notification_sound"
+description_key = "settings.notification_sound.description"
+type = "file"
+default = ""
+extensions = [".wav", ".ogg", ".mp3", ".flac"]
+
+[[setting]]
+key = "notification_font"
+label_key = "settings.notification_font"
+description_key = "settings.notification_font.description"
+type = "file"
+default = ""
+extensions = [".ttf", ".otf"]
+
+[[setting]]
+key = "ui_font"
+label_key = "settings.ui_font"
+description_key = "settings.ui_font.description"
+type = "file"
+default = ""
+extensions = [".ttf", ".otf"]
+
+[[setting]]
+key = "music_font"
+label_key = "settings.music_font"
+description_key = "settings.music_font.description"
+type = "file"
+default = ""
+extensions = [".ttf", ".otf"]
+
+[[setting]]
+key = "music_banner"
+label_key = "settings.music_banner"
+description_key = "settings.music_banner.description"
+type = "file"
+default = ""
+extensions = [".png", ".jpg", ".jpeg", ".webp"]
+
+[[setting]]
+key = "music_character_frame"
+label_key = "settings.music_character_frame"
+description_key = "settings.music_character_frame.description"
+type = "file"
+default = ""
+extensions = [".png", ".jpg", ".jpeg", ".webp"]
+
+[[setting]]
+key = "music_character_name"
+label_key = "settings.music_character_name"
+description_key = "settings.music_character_name.description"
+type = "string"
+default = ""
+
+[[setting]]
+key = "calendar_assets_dir"
+label_key = "settings.calendar_assets_dir"
+description_key = "settings.calendar_assets_dir.description"
+type = "folder"
+default = ""
+
+[[setting]]
+key = "wallpaper_auto_enabled"
+label_key = "settings.wallpaper_auto_enabled"
+description_key = "settings.wallpaper_auto_enabled.description"
+type = "bool"
+default = true
+
+[[setting]]
+key = "wallpaper_day"
+label_key = "settings.wallpaper_day"
+description_key = "settings.wallpaper_day.description"
+type = "file"
+default = ""
+extensions = [".png", ".jpg", ".jpeg", ".webp"]
+
+[[setting]]
+key = "wallpaper_afternoon"
+label_key = "settings.wallpaper_afternoon"
+description_key = "settings.wallpaper_afternoon.description"
+type = "file"
+default = ""
+extensions = [".png", ".jpg", ".jpeg", ".webp"]
+
+[[setting]]
+key = "wallpaper_night"
+label_key = "settings.wallpaper_night"
+description_key = "settings.wallpaper_night.description"
+type = "file"
+default = ""
+extensions = [".png", ".jpg", ".jpeg", ".webp"]
