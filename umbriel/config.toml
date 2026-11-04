@@ -1,0 +1,20 @@
+# ==============================================================================
+# P5 Rice — Umbriel Configuration (Notifications & Music Widget)
+# Reference: https://docs.noctalia.dev/umbriel/
+#
+# NOTE: No [keybinds] table is defined here so Umbriel's built-in / user
+# keybindings remain 100% untouched.
+# ==============================================================================
+
+[general]
+autostart = [
+  "noctalia",
+  "p5-rice-daemon",
+]
+
+# ==============================================================================
+# Layer Rules for P5 Notification, Calendar & Music Desktop Widget
+# ==============================================================================
+[[layer_rule]]
+match.namespace = "^noctalia-(p5notify|p5calendar|desktop-widget-p5music)$"
+blur = false
