@@ -3,6 +3,8 @@
 A native P5 desktop rice for **[Umbriel](https://docs.noctalia.dev/umbriel/)**
 and **[Noctalia v5+](https://docs.noctalia.dev/noctalia/)**:
 
+![P5 Widgets — notification banner, music widget, calendar and wallpaper automation](docs/screenshot.png)
+
 - **Notifications** — Noctalia stays the notification server; the native daemon monitors `Notify` calls and renders the P5 sticker banner.
 - **Music** — P5 confidant player with MPRIS controls, ransom-note Jitter text,
   album art, seek bar and animated character frame.
